@@ -15,7 +15,7 @@ function CSCconverter_LLready_mex_disk()
 
 % --------- USER SETTINGS ----------
 reqsPath   = fullfile(fileparts(mfilename('fullpath')), 'reqsPath'); % where Nlx2MatCSC.* lives
-basePath   = 'C:\Users\info\Desktop\Barry\Data\TestIEDData\M13s2aug1\2023-08-01_12-11-26';
+basePath   = 'C:\Users\Barry Lab\Desktop\TestIEDData\M13s2aug1\2023-08-01_12-11-26';
 nTotalCh   = 64;            % expects CSC1.ncs ... CSC64.ncs
 evenOnly   = true;         % <-- set true to include only even channels (2,4,6,...)
 storeClass = 'single';      % 'single' (recommended) or 'double'
@@ -35,7 +35,7 @@ end
 fprintf('Using Nlx2MatCSC found at:\n'); disp(nlxPaths(:));
 
 % --- Channel selection ---
-allCh = 1:nTotalCh;
+allCh = 1:4;
 if evenOnly
     kept_channels = allCh(mod(allCh,2)==0); % 2,4,6,...
 else
