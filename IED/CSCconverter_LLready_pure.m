@@ -35,7 +35,7 @@ end
 fprintf('Using Nlx2MatCSC found at:\n'); disp(nlxPaths(:));
 
 % --- Channel selection ---
-allCh = 1:4;
+allCh = 1:nTotalCh;
 if evenOnly
     kept_channels = allCh(mod(allCh,2)==0); % 2,4,6,...
 else
