@@ -4,7 +4,7 @@ function RunLLspikedetector()
 
 %% -------------------- USER SETTINGS --------------------
 % Path to the converted .mat created by CSCconverter_LLready_mex_disk:
-inMat = 'C:\Users\Barry Lab\Desktop\TestIEDData\M13s2aug1\2023-08-01_12-11-26\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat';
+inMat = "C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat";
 
 % LLspikedetector params:
 llw_sec = 0.040;     % line-length window in seconds (e.g., 40 ms)
