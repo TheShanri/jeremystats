@@ -1,6 +1,7 @@
 function SpikeAvgPerChannelCompare(dataMatPath, spikesMatPath, varargin)
 % SpikeAvgPerChannelCompare
 % For EACH channel, compute average event-aligned waveform across spikes
+% TODO... Add overlapping wave analysis
 % twice: (1) align to event midpoint, (2) align to per-channel peak.
 % Plot mean ± SEM for both in a 2x1 figure and save one PNG per channel.
 %
