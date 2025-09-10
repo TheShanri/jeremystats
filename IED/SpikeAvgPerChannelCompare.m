@@ -5,8 +5,12 @@ function SpikeAvgPerChannelCompare(dataMatPath, spikesMatPath, varargin)
 % Plot mean ± SEM for both in a 2x1 figure and save one PNG per channel.
 %
 % Window: half-width of 30 ms (configurable via 'halfWidthMs')
-% Fixed y-axis: [-2, 2] mV (configurable via 'yLimMV')
 % Peak polarity for 'peak' alignment: 'abs'|'pos'|'neg'
+% y-axis: auto (best fit) per panel (no fixed limits)
+%
+% Annotations per panel:
+%   - Peak amplitude of the mean waveform (mV)
+%   - SEM at that peak time (mV)
 %
 % Events included for a channel:
 %   - If 'ech' exists: only events where ech(e, ch)==true
@@ -14,27 +18,25 @@ function SpikeAvgPerChannelCompare(dataMatPath, spikesMatPath, varargin)
 %
 % EXAMPLE
 % SpikeAvgPerChannelCompare('...\LL_input_data.mat','...\LLspikes.mat',...
-%     'halfWidthMs',0.030,'yLimMV',[-2 2],'peakPolarity','abs',...
-%     'saveDir','C:\tmp\perChannelCompare');
+%     'halfWidthMs',0.030,'peakPolarity','abs',...
+%     'saveDir','C:\tmp\perChannelCompare','scaleToMV',1);
 
 % ---- Parse inputs ----
 p = inputParser;
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 p.addRequired('spikesMatPath', @(s)ischar(s)||isstring(s));
 p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);     % 30 ms default
-p.addParameter('yLimMV', [0 3000], @(v)isnumeric(v)&&numel(v)==2&&v(1)<v(2));
 p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
 p.addParameter('scaleToMV', 1, @(x)isfinite(x)&&x>0);           % AD->mV multiplier
 p.addParameter('saveDir','', @(s)ischar(s)||isstring(s));
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
 p.parse(dataMatPath, spikesMatPath, varargin{:});
 
-halfWidthMs   = p.Results.halfWidthMs;
-yLimMV        = p.Results.yLimMV;
-peakPolarity  = lower(string(p.Results.peakPolarity));
-scaleToMV     = p.Results.scaleToMV;
-saveDir       = string(p.Results.saveDir);
-channelIndices= p.Results.channelIndices;
+halfWidthMs    = p.Results.halfWidthMs;
+peakPolarity   = lower(string(p.Results.peakPolarity));
+scaleToMV      = p.Results.scaleToMV;
+saveDir        = string(p.Results.saveDir);
+channelIndices = p.Results.channelIndices;
 
 % ---- Open data & spikes ----
 if ~isfile(dataMatPath), error('Data MAT not found: %s', dataMatPath); end
@@ -97,8 +99,8 @@ fprintf('Comparing midpoint vs peak for %d channel(s) over up to %d events. HW=%
 % ---- Main per-channel loop ----
 for ch = chList
     % Build matrices for both alignment modes
-    [X_mid, nUsed_mid] = collectWindows(mf, ets, ech(:,ch), ch, 'midpoint', peakPolarity, HW, nSamp, scaleToMV);
-    [X_peak, nUsed_peak] = collectWindows(mf, ets, ech(:,ch), ch, 'peak',     peakPolarity, HW, nSamp, scaleToMV);
+    [X_mid, nUsed_mid]  = collectWindows(mf, ets, ech(:,ch), ch, 'midpoint', peakPolarity, HW, nSamp, scaleToMV);
+    [X_peak, nUsed_peak]= collectWindows(mf, ets, ech(:,ch), ch, 'peak',     peakPolarity, HW, nSamp, scaleToMV);
 
     if nUsed_mid == 0 && nUsed_peak == 0
         fprintf('Channel %d: no valid event windows, skipping.\n', ch);
@@ -109,27 +111,33 @@ for ch = chList
     mu_mid = mean(X_mid, 1, 'omitnan');  se_mid = std(X_mid, 0, 1, 'omitnan') ./ max(1,sqrt(nUsed_mid));
     mu_pk  = mean(X_peak,1, 'omitnan');  se_pk  = std(X_peak,0, 1, 'omitnan') ./ max(1,sqrt(nUsed_peak));
 
+    % Peak metrics (of the mean)
+    [peakAmp_mid, semAtPeak_mid] = peakMetrics(mu_mid, se_mid);
+    [peakAmp_pk,  semAtPeak_pk ] = peakMetrics(mu_pk,  se_pk );
+
     % --- Figure: 2x1 (midpoint on top, peak on bottom) ---
     f = figure('Color','w','Position',[80 80 950 700],'Visible','off');
 
     % Top: midpoint
     ax1 = subplot(2,1,1,'Parent',f); hold(ax1,'on'); grid(ax1,'on'); box(ax1,'on');
     shadedMean(ax1, tRelMs, mu_mid, se_mid);
-    commonAxes(ax1, yLimMV, tRelMs);
+    annotatePanel(ax1, peakAmp_mid, semAtPeak_mid);
     if ~isempty(kept_channels), chLabel = sprintf('row %d (CSC%d)', ch, kept_channels(ch));
     else, chLabel = sprintf('row %d', ch); end
     title(ax1, sprintf('MIDPOINT alignment  |  %s  |  events used: %d', chLabel, nUsed_mid));
+    ylabel(ax1, 'Amplitude (mV)');
 
     % Bottom: peak
     ax2 = subplot(2,1,2,'Parent',f); hold(ax2,'on'); grid(ax2,'on'); box(ax2,'on');
     shadedMean(ax2, tRelMs, mu_pk, se_pk);
-    commonAxes(ax2, yLimMV, tRelMs);
+    annotatePanel(ax2, peakAmp_pk, semAtPeak_pk);
     xlabel(ax2, 'Time relative to anchor (ms)');
+    ylabel(ax2, 'Amplitude (mV)');
     title(ax2, sprintf('PEAK (%s) alignment  |  %s  |  events used: %d', peakPolarity, chLabel, nUsed_peak));
 
     % Save
-    outPng = fullfile(outDir, sprintf('PerChannelAvgCompare_ch%03d_HW%ds_%dms_ylim[%g_%g].png', ...
-                                      ch, HW, round(1e3*HW/sfx), yLimMV(1), yLimMV(2)));
+    outPng = fullfile(outDir, sprintf('PerChannelAvgCompare_ch%03d_HW%ds_%dms.png', ...
+                                      ch, HW, round(1e3*HW/sfx)));
     exportgraphics(f, outPng, 'Resolution', 220);
     close(f);
 
@@ -190,12 +198,26 @@ function shadedMean(ax, x, mu, se)
     plot(ax, x, mu, 'LineWidth', 1.8);
     yline(ax,0,':','Color',[0.6 0.6 0.6]);
     xline(ax,0,'--k','LineWidth',1.0);
-    ylabel(ax, 'Amplitude (mV)');
 end
 
-function commonAxes(ax, yLimMV, tRelMs)
-    ylim(ax, yLimMV);
-    xlim(ax, [tRelMs(1), tRelMs(end)]);
+function [peakAmp, semAtPeak] = peakMetrics(mu, se)
+    if isempty(mu) || all(~isfinite(mu))
+        peakAmp = NaN; semAtPeak = NaN; return;
+    end
+    [~, k] = max(abs(mu));      % index of |mean| peak
+    peakAmp = mu(k);            % signed peak amplitude (mV)
+    if isempty(se) || all(~isfinite(se))
+        semAtPeak = NaN;
+    else
+        semAtPeak = se(min(k, numel(se)));  % SEM at that time point
+    end
+end
+
+function annotatePanel(ax, peakAmp, semAtPeak)
+    txt = sprintf('Peak = %.3f mV\nSEM@peak = %.3f mV', peakAmp, semAtPeak);
+    text(ax, 0.02, 0.95, txt, 'Units','normalized', ...
+         'VerticalAlignment','top', 'FontSize',10, ...
+         'BackgroundColor','w', 'Margin',3, 'EdgeColor',[0.8 0.8 0.8]);
 end
 
 end
