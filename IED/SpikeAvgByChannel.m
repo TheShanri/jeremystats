@@ -133,7 +133,7 @@ for r = 1:Nevents
     for i = 1:numel(usedCh)
         ch = usedCh(i);
         y  = X(i,:);
-        if ch >= 22 && ch <= 34
+        if ~isempty(kept_channels) && kept_channels(ch) >= 22 && kept_channels(ch) <= 34
             c = [0.85 0.10 0.10]; % strong red for these channels
         else
             c = pastelize(baseColors(1+mod(i-1,size(baseColors,1)),:), 0.5); % ~50% opacity look
@@ -231,7 +231,7 @@ function s = channelLabelString(chs, kept_channels)
         else
             lab = sprintf('row %d', ch);
         end
-        if ch >= 22 && ch <= 34
+        if ~isempty(kept_channels) && kept_channels(ch) >= 22 && kept_channels(ch) <= 34
             parts{i} = sprintf('\\color{red}%s\\color{black}', lab);
         else
             parts{i} = lab;
