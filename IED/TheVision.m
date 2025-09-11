@@ -1,8 +1,8 @@
 function TheVision(dataMatPath, spikesMatPath, varargin)
 % TheVision
 % Select events that appear on 5–10 channels (inclusive). For each such event:
-%   - Extract a window around the event (default anchor = event midpoint).
-%   - Plot ALL channels in a grid (works for 32, 64, or any number of channels).
+%   - Extract a window around the event (default anchor = event midpoint or per-channel peak).
+%   - Plot ALL channels in a single COLUMN (rows-only), one subplot per channel.
 %   - Channels where the event appeared (ech==true) are bold/dark; others thin/light.
 %   - Save one PNG per event, include event index and active-channel count in filename.
 %
@@ -18,7 +18,8 @@ function TheVision(dataMatPath, spikesMatPath, varargin)
 %   'saveDir'       (string/char) default: alongside dataMatPath
 %   'minCh'         (int) default 5
 %   'maxCh'         (int) default 10
-%   'gridCols'      (int) default 8           % good for 32/64 channels
+%
+% NOTE: Layout is forced to one column (rows only).
 
 % ---------- Parse ----------
 p = inputParser;
@@ -31,7 +32,6 @@ p.addParameter('scaleToMV', 1, @(x)isfinite(x)&&x>0);
 p.addParameter('saveDir','', @(s)ischar(s)||isstring(s));
 p.addParameter('minCh', 5, @(x)isfinite(x)&&x>=0);
 p.addParameter('maxCh',10, @(x)isfinite(x)&&x>=0);
-p.addParameter('gridCols',8, @(x)isfinite(x)&&x>=1);
 p.parse(dataMatPath, spikesMatPath, varargin{:});
 
 halfWidthMs  = p.Results.halfWidthMs;
@@ -41,7 +41,6 @@ scaleToMV    = p.Results.scaleToMV;
 saveDir      = string(p.Results.saveDir);
 minCh        = p.Results.minCh;
 maxCh        = p.Results.maxCh;
-gridCols     = p.Results.gridCols;
 
 % ---------- Load ----------
 if ~isfile(dataMatPath), error('Data MAT not found: %s', dataMatPath); end
@@ -140,12 +139,16 @@ for ii = 1:numel(evtIdx)
         continue;
     end
 
-    % ---------- Figure: grid of subplots ----------
+    % ---------- Figure: rows-only (one column) ----------
     nUsed = numel(usedRows);
-    nCols = min(gridCols, nUsed);
-    nRowsGrid = ceil(nUsed / nCols);
+    nCols = 1;                    % FORCE one column
+    nRowsGrid = nUsed;            % one row per channel
 
-    f = figure('Color','w','Position',[60 60 1300 900],'Visible','off');
+    % Figure height scales with number of channels (cap to keep files manageable)
+    perRowPx = 90; basePx = 200; maxPx = 5000;
+    figH = min(maxPx, basePx + perRowPx * nRowsGrid);
+    f = figure('Color','w','Position',[60 60 900 figH],'Visible','off');
+
     tl = tiledlayout(f, nRowsGrid, nCols, 'Padding','compact', 'TileSpacing','compact');
 
     for k = 1:nUsed
@@ -169,16 +172,12 @@ for ii = 1:numel(evtIdx)
 
         % Compact axes
         ax = gca; ax.FontSize = 8;
-        if k <= (nUsed - nCols) % hide xlabels except bottom row
+        if k < nUsed % hide xlabels except bottom row
             ax.XTickLabel = [];
         else
             xlabel('ms');
         end
-        if mod(k-1,nCols)~=0  % hide ylabels except first column
-            ax.YTickLabel = [];
-        else
-            ylabel('mV');
-        end
+        ylabel('mV');
     end
 
     % ---------- Super title + save ----------
@@ -186,7 +185,7 @@ for ii = 1:numel(evtIdx)
                        e, nActive, alignMode, 1e3*HW/sfx);
     sgtitle(tl, titleStr, 'FontSize',12, 'FontWeight','bold');
 
-    outPng = fullfile(outDir, sprintf('Evt%03d_%dch_align-%s_HW%ds_%dms.png', ...
+    outPng = fullfile(outDir, sprintf('Evt%03d_%dch_align-%s_HW%ds_%dms_rows-only.png', ...
                     e, nActive, alignMode, HW, round(1e3*HW/sfx)));
     exportgraphics(f, outPng, 'Resolution', 220);
     close(f);
@@ -196,7 +195,7 @@ end
 fprintf('Done. Output dir: %s\n', outDir);
 end
 
-% ======== Local helper functions (must be after the main function END) ========
+% ======== Local helper functions ========
 
 function s = tern(cond, a, b)
 if cond, s = a; else, s = b; end
