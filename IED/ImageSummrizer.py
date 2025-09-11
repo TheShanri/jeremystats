@@ -213,3 +213,48 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    . : File C:\Users\Z390\Documents\WindowsPowerShell\profile.ps1 cannot be loaded because running scripts       
+https:/go.microsoft.com/fwlink/?LinkID=135170.
+At line:1 char:3
++ . 'C:\Users\Z390\Documents\WindowsPowerShell\profile.ps1'
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + FullyQualifiedErrorId : UnauthorizedAccess
+PS C:\Users\Z390> C:/Users/Z390/miniconda3/Scripts/activate
+PS C:\Users\Z390> conda activate base
+
+
+PS C:\Users\Z390> & C:/Users/Z390/miniconda3/python.exe "c:/Users/Z390/Desktop/IED DATA/ImageSummrizer.py"    
+Traceback (most recent call last):
+    from PIL import Image
+ModuleNotFoundError: No module named 'PIL'
+PS C:\Users\Z390> & C:/Users/Z390/miniconda3/python.exe "c:/Users/Z390/Desktop/IED DATA/ImageSummrizer.py"    
+Traceback (most recent call last):
+  File "c:\Users\Z390\Desktop\IED DATA\ImageSummrizer.py", line 7, in <module>
+    from PIL import Image
+ModuleNotFoundError: No module named 'PIL'
+PS C:\Users\Z390> pip install PIL
+ERROR: No matching distribution found for PIL
+PS C:\Users\Z390> & C:/Users/Z390/miniconda3/python.exe "c:/Users/Z390/Desktop/IED DATA/ImageSummrizer.py"& C:/Users/Z390/miniconda3/python.exe "c:/Users/Z390/Desktop/IED DATA/ImageSummrizer.py"
+At line:1 char:89
++                                                                 ~
+The ampersand (&) character is not allowed. The & operator is reserved for future use; wrap an ampersand in
+double quotation marks ("&") to pass it as part of a string.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+
+PS C:\Users\Z390> & C:/Users/Z390/miniconda3/python.exe "c:/Users/Z390/Desktop/IED DATA/ImageSummrizer.py"
+Traceback (most recent call last):
+  File "c:\Users\Z390\Desktop\IED DATA\ImageSummrizer.py", line 7, in <module>
+PS C:\Users\Z390> & C:/Users/Z390/miniconda3/python.exe "c:/Users/Z390/Desktop/IED DATA/ImageSummrizer.py"
+Traceback (most recent call last):
+  File "c:\Users\Z390\Desktop\IED DATA\ImageSummrizer.py", line 7, in <module>
+    from PIL import Image
+ModuleNotFoundError: No module named 'PIL'
+PS C:\Users\Z390> 
+
+
+
+
+
+
+
