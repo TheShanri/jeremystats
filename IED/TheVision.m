@@ -1,4 +1,4 @@
-function PlotEventAllChannels_5to10(dataMatPath, spikesMatPath, varargin)
+function TheVision(dataMatPath, spikesMatPath, varargin)
 % PlotEventAllChannels_5to10
 % Select events that appear on 5–10 channels (inclusive). For each such event:
 %   - Extract a window around the event (default anchor = event midpoint).
