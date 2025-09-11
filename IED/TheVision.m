@@ -30,8 +30,8 @@ p.addParameter('align','midpoint', @(s)any(strcmpi(s,{'midpoint','peak'})));
 p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
 p.addParameter('scaleToMV', 1, @(x)isfinite(x)&&x>0);
 p.addParameter('saveDir','', @(s)ischar(s)||isstring(s));
-p.addParameter('minCh', 5, @(x)isfinite(x)&&x>=0);
-p.addParameter('maxCh',10, @(x)isfinite(x)&&x>=0);
+p.addParameter('minCh', 6, @(x)isfinite(x)&&x>=0);
+p.addParameter('maxCh',8, @(x)isfinite(x)&&x>=0);
 p.parse(dataMatPath, spikesMatPath, varargin{:});
 
 halfWidthMs  = p.Results.halfWidthMs;
@@ -177,7 +177,7 @@ for ii = 1:numel(evtIdx)
         else
             xlabel('ms');
         end
-        ylabel('mV');
+        ylabel('μV');
     end
 
     % ---------- Super title + save ----------
