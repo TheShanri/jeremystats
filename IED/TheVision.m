@@ -1,28 +1,24 @@
 function TheVision(dataMatPath, spikesMatPath, varargin)
-% PlotEventAllChannels_5to10
+% TheVision
 % Select events that appear on 5–10 channels (inclusive). For each such event:
 %   - Extract a window around the event (default anchor = event midpoint).
 %   - Plot ALL channels in a grid (works for 32, 64, or any number of channels).
 %   - Channels where the event appeared (ech==true) are bold/dark; others thin/light.
 %   - Save one PNG per event, include event index and active-channel count in filename.
 %
-% Inputs (same style as your other functions):
+% Inputs:
 %   dataMatPath: MAT with fields d [nRows x nSamp], sfx (Hz), kept_channels (optional)
 %   spikesMatPath: MAT with ets [N x 2], ech [N x nRows] (optional)
 %
 % Name-Value options:
 %   'halfWidthMs'   (double) default 30e-3   % 30 ms half-window
 %   'align'         ('midpoint'|'peak') default 'midpoint'
-%   'peakPolarity'  ('abs'|'pos'|'neg') default 'abs'   % only used if align='peak'
+%   'peakPolarity'  ('abs'|'pos'|'neg') default 'abs'   % used if align='peak'
 %   'scaleToMV'     (double) default 1
 %   'saveDir'       (string/char) default: alongside dataMatPath
 %   'minCh'         (int) default 5
 %   'maxCh'         (int) default 10
 %   'gridCols'      (int) default 8           % good for 32/64 channels
-%
-% Example:
-% PlotEventAllChannels_5to10('LL_input_data.mat','LLspikes.mat',...
-%   'halfWidthMs',0.030,'align','midpoint','saveDir','C:\tmp\evtGrids')
 
 % ---------- Parse ----------
 p = inputParser;
@@ -55,7 +51,7 @@ mf = matfile(dataMatPath);
 try, sfx = mf.sfx; catch, error('Missing "sfx" in data MAT.'); end
 nRows = size(mf,'d',1);
 nSamp = size(mf,'d',2);
-try kept_channels = mf.kept_channels; catch, kept_channels = []; end
+try kept_channels = mf.kept_channels; catch, kept_channels = []; end %#ok<NASGU>
 
 S = load(spikesMatPath,'ets','ech');
 if ~isfield(S,'ets'), error('Spikes MAT must contain ets [N x 2].'); end
@@ -82,7 +78,7 @@ end
 
 % ---------- Setup ----------
 HW = max(1, round(halfWidthMs * sfx));  % half-width in samples
-tRelSamples = -HW:HW;
+tRelSamples = -HW:HW; %#ok<NASGU>
 tRelMs = (tRelSamples / sfx) * 1e3;
 
 if saveDir==""
@@ -103,7 +99,7 @@ for ii = 1:numel(evtIdx)
     s0_ev = max(1, ets(e,1));
     s1_ev = min(nSamp, ets(e,2));
 
-    % Determine anchor (one anchor for all channels if midpoint; per-channel if peak)
+    % Determine anchor (shared midpoint OR per-channel peak)
     switch alignMode
         case "midpoint"
             anchor = round((s0_ev + s1_ev)/2);
@@ -113,10 +109,10 @@ for ii = 1:numel(evtIdx)
                 continue;
             end
             % Pre-read all channels in a single call for speed
-            Y = double(mf.d(:, s0:s1)) * scaleToMV;   % [nRows x winN]
-            validRow = all(isfinite(Y),2);
-            Y = Y(validRow, :);
+            Yfull = double(mf.d(:, s0:s1)) * scaleToMV;   % [nRows x winN]
+            validRow = all(isfinite(Yfull),2);
             usedRows = find(validRow).';
+            Y = Yfull(validRow, :);
         otherwise % 'peak'
             % Per-channel anchor within the event window
             usedRows = [];
@@ -125,11 +121,11 @@ for ii = 1:numel(evtIdx)
                 yseg = double(mf.d(ch, s0_ev:s1_ev));
                 if any(~isfinite(yseg)), continue; end
                 switch peakPolarity
-                    case 'pos', [~,k] = max(yseg);
-                    case 'neg', [~,k] = min(yseg);
-                    otherwise,  [~,k] = max(abs(yseg));
+                    case 'pos', [~,kpk] = max(yseg);
+                    case 'neg', [~,kpk] = min(yseg);
+                    otherwise,  [~,kpk] = max(abs(yseg));
                 end
-                a = s0_ev + k - 1;
+                a = s0_ev + kpk - 1;
                 s0 = a - HW; s1 = a + HW;
                 if s0 < 1 || s1 > nSamp, continue; end
                 y = double(mf.d(ch, s0:s1)) * scaleToMV;
@@ -168,15 +164,11 @@ for ii = 1:numel(evtIdx)
         plot(tRelMs, Y(k,:), 'LineWidth', lw, 'Color', col);
         xline(0,'--k','LineWidth',0.8); yline(0,':','Color',[0.7 0.7 0.7]);
 
-        if ~isempty(kept_channels)
-            ttl = sprintf('row %d (CSC%d)%s', ch, kept_channels(ch), tern(isActive,' *',''));
-        else
-            ttl = sprintf('row %d%s', ch, tern(isActive,' *',''));
-        end
-        title(ttl, 'FontSize',8);
+        titleStr = localTitle(ch, isActive, kept_channels);
+        title(titleStr, 'FontSize',8);
+
         % Compact axes
-        ax = gca;
-        ax.FontSize = 8;
+        ax = gca; ax.FontSize = 8;
         if k <= (nUsed - nCols) % hide xlabels except bottom row
             ax.XTickLabel = [];
         else
@@ -202,7 +194,19 @@ for ii = 1:numel(evtIdx)
 end
 
 fprintf('Done. Output dir: %s\n', outDir);
+end
 
-% ---------- helpers ----------
-function s = tern(cond, a, b), if cond, s=a; else, s=b; end
+% ======== Local helper functions (must be after the main function END) ========
+
+function s = tern(cond, a, b)
+if cond, s = a; else, s = b; end
+end
+
+function ttl = localTitle(rowIdx, isActive, kept_channels)
+aster = tern(isActive,' *','');
+if ~isempty(kept_channels)
+    ttl = sprintf('row %d (CSC%d)%s', rowIdx, kept_channels(rowIdx), aster);
+else
+    ttl = sprintf('row %d%s', rowIdx, aster);
+end
 end
