@@ -77,10 +77,10 @@ if isfield(S,'ech')
         if size(ech,2) < nRows, ech(:,end+1:nRows) = false; else, ech = ech(:,1:nRows); end
     end
 else
-    ech = true(Nevents, nRows); % if missing, treat as present on all channels
+    ech = true(Nevents, nRows);
 end
 
-% ---------- Select events with channel count in [minCh, maxCh] ----------
+% ---------- Select events ----------
 chCounts = sum(ech,2);
 sel = (chCounts >= minCh) & (chCounts <= maxCh);
 evtIdx = find(sel);
@@ -104,27 +104,30 @@ if ~exist(outDir,'dir'), mkdir(outDir); end
 fprintf('Overlay: %d qualifying event(s) (%d–%d ch). Window ±%d samples (%.2f ms). Using stride=%d offset=%d. Scale=%g µV.\n', ...
     numel(evtIdx), minCh, maxCh, HW, 1e3*HW/sfx, channelStride, channelOffset, scaleToMicroV);
 
-% ---------- Build row selection by stride/offset ----------
-% MATLAB rows are 1-based. We implement: keep rows r where mod(r-1, stride) == offset
+% Row selection by stride/offset
 offset = mod(channelOffset, channelStride);
 rowKeepMask = arrayfun(@(r) mod(r-1, channelStride) == offset, 1:nRows);
-rowKeepIdx  = find(rowKeepMask);     % these are the rows we will overlay
+rowKeepIdx  = find(rowKeepMask);
 
-% ---------- Iterate selected events ----------
+% Inactive color palette
+colInactiveBelow   = [0.55 0.75 0.95];  % light blue
+colInactiveBetween = [0.70 0.70 0.70];  % gray
+colInactiveAbove   = [0.95 0.60 0.60];  % light red
+colActive          = [0 0 0];
+
+% ---------- Iterate events ----------
 for ii = 1:numel(evtIdx)
     e = evtIdx(ii);
     maskActive = ech(e,:);                 % logical 1 x nRows
     s0_ev = max(1, ets(e,1));
     s1_ev = min(nSamp, ets(e,2));
 
-    % --- 1) Find global anchor from *active* channels only (ech==true) ---
+    % Global anchor from ACTIVE channels only
     activeRows = find(maskActive);
     if isempty(activeRows)
         fprintf('Evt %d: no active rows flagged; skipping.\n', e);
         continue;
     end
-
-    % Per-active-channel peak indices (within [s0_ev:s1_ev]) in raw units (not scaled)
     peakIdx = nan(numel(activeRows),1);
     for k = 1:numel(activeRows)
         ch = activeRows(k);
@@ -142,7 +145,6 @@ for ii = 1:numel(evtIdx)
         fprintf('Evt %d: could not compute peaks on active channels; skipping.\n', e);
         continue;
     end
-    % Global anchor = median of per-channel peaks (robust)
     anchor = round(median(peakIdx));
     s0 = anchor - HW; s1 = anchor + HW;
     if s0 < 1 || s1 > nSamp
@@ -150,32 +152,31 @@ for ii = 1:numel(evtIdx)
         continue;
     end
 
-    % --- 2) Extract windows for *selected* rows (by stride) centered on this anchor ---
+    % Extract windows for selected rows
     rowsToPlot = rowKeepIdx;
-    % If you want exactly, say, 64 traces even if nRows < 64, we just take what's available.
     nPlot = numel(rowsToPlot);
     Y = nan(nPlot, 2*HW+1);
     for k = 1:nPlot
         ch = rowsToPlot(k);
-        y = double(mf.d(ch, s0:s1)) * scaleToMicroV; % convert to µV
+        y = double(mf.d(ch, s0:s1)) * scaleToMicroV; % µV
         if any(~isfinite(y)), continue; end
         Y(k,:) = y;
     end
-
-    % If everything is NaN, skip
     if all(~isfinite(Y(:)))
         fprintf('Evt %d: no valid windows for selected rows; skipping.\n', e);
         continue;
     end
 
-    % --- 3) Fixed symmetric y-limits for this overlay ---
+    % Fixed symmetric y-limits
     maxAbs = max(abs(Y(:)), [], 'omitnan');
     if ~isfinite(maxAbs) || maxAbs<=0, maxAbs = 1; end
-    pad  = 0.05;
-    span = (1+pad) * maxAbs;
-    yL   = [-span, span];
+    pad  = 0.05; span = (1+pad)*maxAbs; yL = [-span, span];
 
-    % --- 4) Plot overlay ---
+    % Active range (by row index) for inactive color coding
+    actMin = min(activeRows);
+    actMax = max(activeRows);
+
+    % Plot overlay
     f = figure('Color','w','Position',[80 80 1000 700],'Visible','off');
     ax = axes('Parent',f); hold(ax,'on'); box(ax,'on'); grid(ax,'on');
 
@@ -183,11 +184,18 @@ for ii = 1:numel(evtIdx)
         ch = rowsToPlot(k);
         y  = Y(k,:);
         if all(~isfinite(y)), continue; end
-        isActive = maskActive(ch);
-        if isActive
-            lw = 1.6; col = [0 0 0];       % active: bold, black
+        if maskActive(ch)
+            lw = 1.6; col = colActive;       % active: bold black
         else
-            lw = 0.8; col = [0.6 0.6 0.6]; % inactive: thin, gray
+            % Inactive color by position relative to active range
+            if ch < actMin
+                col = colInactiveBelow;       % below smallest active -> light blue
+            elseif ch > actMax
+                col = colInactiveAbove;       % above largest active -> light red
+            else
+                col = colInactiveBetween;     % between -> gray
+            end
+            lw = 0.9;
         end
         plot(ax, tRelMs, y, 'LineWidth', lw, 'Color', col);
     end
@@ -196,21 +204,21 @@ for ii = 1:numel(evtIdx)
     yline(ax,0,':','Color',[0.7 0.7 0.7]);
 
     ylim(ax, yL);
-    xlabel(ax, 'ms');
-    ylabel(ax, '\muV');
+    xlabel(ax, 'ms'); ylabel(ax, '\muV');
 
     nActive = sum(maskActive);
     ttl = sprintf('Event %03d  |  Active channels: %d  |  Anchor: median peak @ [%d]  |  Win: \\pm%.1f ms  |  Plotted rows: %d (stride=%d, offset=%d)', ...
                    e, nActive, anchor, 1e3*HW/sfx, nPlot, channelStride, offset);
     title(ax, ttl, 'FontSize', 12, 'FontWeight', 'bold');
 
-    % Optional: tiny legend-like note
-    txt = sprintf('\\fontsize{8}Active=bold black (%d)   Inactive=thin gray (%d)   Units=\\muV   yLim=\\pm%.1f', ...
-                  nActive, nPlot - nActive, span);
+    % Legend note
+    txt = sprintf(['\\fontsize{8}Active=bold black (%d)   Inactive: below=light blue, ', ...
+                   'between=gray, above=light red (%d)   Units=\\muV   yLim=\\pm%.1f'], ...
+                   nActive, nPlot - nActive, span);
     text(ax, 0.01, 0.98, txt, 'Units','normalized', 'VerticalAlignment','top', ...
          'BackgroundColor','w', 'Margin',3, 'EdgeColor',[0.85 0.85 0.85], 'Interpreter','tex');
 
-    % --- 5) Save ---
+    % Save
     msWin = round(1e3*HW/sfx);
     outPng = fullfile(outDir, sprintf('Overlay_Evt%03d_%drows_stride%d_off%d_HW%ds_%dms_uV.png', ...
                                       e, nPlot, channelStride, offset, HW, msWin));
