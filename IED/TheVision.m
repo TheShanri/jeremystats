@@ -6,18 +6,29 @@ function TheVision(dataMatPath, spikesMatPath, varargin)
 %   - Channels where the event appeared (ech==true) are bold/dark; others thin/light.
 %   - Save one PNG per event, include event index and active-channel count in filename.
 %
+% Units & scaling:
+%   - All plotting and labeling are in microvolts (µV).
+%   - Use 'scaleToMicroV' to convert raw data units to µV (default 1 = already µV).
+%   - Legacy 'scaleToMV' is accepted but DEPRECATED; it is internally converted to µV as (mV * 1000).
+%
+% Fixed y-axis:
+%   - Within each produced figure (event), all subplots share the same y-limits.
+%   - Limits are symmetric around zero and based on the max |amplitude| across plotted channels for that event,
+%     with a small padding.
+%
 % Inputs:
 %   dataMatPath: MAT with fields d [nRows x nSamp], sfx (Hz), kept_channels (optional)
 %   spikesMatPath: MAT with ets [N x 2], ech [N x nRows] (optional)
 %
 % Name-Value options:
-%   'halfWidthMs'   (double) default 30e-3   % 30 ms half-window
-%   'align'         ('midpoint'|'peak') default 'midpoint'
-%   'peakPolarity'  ('abs'|'pos'|'neg') default 'abs'   % used if align='peak'
-%   'scaleToMV'     (double) default 1
-%   'saveDir'       (string/char) default: alongside dataMatPath
-%   'minCh'         (int) default 5
-%   'maxCh'         (int) default 10
+%   'halfWidthMs'    (double) default 30e-3   % 30 ms half-window
+%   'align'          ('midpoint'|'peak') default 'midpoint'
+%   'peakPolarity'   ('abs'|'pos'|'neg') default 'abs'   % used if align='peak'
+%   'scaleToMicroV'  (double) default 1       % multiply raw data to get µV
+%   'scaleToMV'      (double) default []      % DEPRECATED; if provided, overrides scaleToMicroV = scaleToMV*1000
+%   'saveDir'        (string/char) default: alongside dataMatPath
+%   'minCh'          (int) default 6
+%   'maxCh'          (int) default 8
 %
 % NOTE: Layout is forced to one column (rows only).
 
@@ -28,19 +39,29 @@ p.addRequired('spikesMatPath', @(s)ischar(s)||isstring(s));
 p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);
 p.addParameter('align','midpoint', @(s)any(strcmpi(s,{'midpoint','peak'})));
 p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
-p.addParameter('scaleToMV', 1, @(x)isfinite(x)&&x>0);
+p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
+p.addParameter('scaleToMV', [], @(x)isempty(x)||(isfinite(x)&&x>0)); % DEPRECATED
 p.addParameter('saveDir','', @(s)ischar(s)||isstring(s));
 p.addParameter('minCh', 6, @(x)isfinite(x)&&x>=0);
-p.addParameter('maxCh',8, @(x)isfinite(x)&&x>=0);
+p.addParameter('maxCh', 8, @(x)isfinite(x)&&x>=0);
 p.parse(dataMatPath, spikesMatPath, varargin{:});
 
-halfWidthMs  = p.Results.halfWidthMs;
-alignMode    = lower(string(p.Results.align));
-peakPolarity = lower(string(p.Results.peakPolarity));
-scaleToMV    = p.Results.scaleToMV;
-saveDir      = string(p.Results.saveDir);
-minCh        = p.Results.minCh;
-maxCh        = p.Results.maxCh;
+halfWidthMs   = p.Results.halfWidthMs;
+alignMode     = lower(string(p.Results.align));
+peakPolarity  = lower(string(p.Results.peakPolarity));
+scaleToMicroV = p.Results.scaleToMicroV;
+scaleToMV     = p.Results.scaleToMV; % deprecated
+saveDir       = string(p.Results.saveDir);
+minCh         = p.Results.minCh;
+maxCh         = p.Results.maxCh;
+
+% Backward compatibility: if scaleToMV provided, convert to µV and warn
+if ~isempty(scaleToMV)
+    scaleToMicroV = scaleToMV * 1000; % mV -> µV
+    warning('TheVision:DeprecatedArg', ...
+        ['''scaleToMV'' is deprecated. Use ''scaleToMicroV'' instead. ', ...
+         'Proceeding with scaleToMicroV = scaleToMV*1000 = %g.'], scaleToMicroV);
+end
 
 % ---------- Load ----------
 if ~isfile(dataMatPath), error('Data MAT not found: %s', dataMatPath); end
@@ -87,8 +108,9 @@ else
 end
 if ~exist(outDir,'dir'), mkdir(outDir); end
 
-fprintf('Found %d event(s) with %d–%d channels. Window ±%d samples (%.2f ms).\n', ...
+fprintf('Found %d event(s) with %d–%d channels. Window ±%d samples (%.2f ms). ', ...
     numel(evtIdx), minCh, maxCh, HW, 1e3*HW/sfx);
+fprintf('Scaling to µV with factor %g.\n', scaleToMicroV);
 
 % ---------- Iterate selected events ----------
 for ii = 1:numel(evtIdx)
@@ -107,11 +129,11 @@ for ii = 1:numel(evtIdx)
                 fprintf('Evt %d skipped (window out of bounds).\n', e);
                 continue;
             end
-            % Pre-read all channels in a single call for speed
-            Yfull = double(mf.d(:, s0:s1)) * scaleToMV;   % [nRows x winN]
+            % Pre-read all channels in a single call for speed; convert to µV
+            Yfull = double(mf.d(:, s0:s1)) * scaleToMicroV;   % [nRows x winN] in µV
             validRow = all(isfinite(Yfull),2);
             usedRows = find(validRow).';
-            Y = Yfull(validRow, :);
+            Y = Yfull(validRow, :); % in µV
         otherwise % 'peak'
             % Per-channel anchor within the event window
             usedRows = [];
@@ -127,9 +149,9 @@ for ii = 1:numel(evtIdx)
                 a = s0_ev + kpk - 1;
                 s0 = a - HW; s1 = a + HW;
                 if s0 < 1 || s1 > nSamp, continue; end
-                y = double(mf.d(ch, s0:s1)) * scaleToMV;
+                y = double(mf.d(ch, s0:s1)) * scaleToMicroV; % convert to µV
                 if any(~isfinite(y)), continue; end
-                Y(end+1,:) = y; %#ok<AGROW>
+                Y(end+1,:) = y; %#ok<AGROW>  % in µV
                 usedRows(end+1) = ch; %#ok<AGROW>
             end
     end
@@ -138,6 +160,13 @@ for ii = 1:numel(evtIdx)
         fprintf('Evt %d: no valid channel windows, skipping.\n', e);
         continue;
     end
+
+    % ---------- Compute FIXED y-limits for this figure (event), symmetric around 0 ----------
+    maxAbs = max(abs(Y(:)));
+    if ~isfinite(maxAbs) || maxAbs==0, maxAbs = 1; end
+    pad = 0.05;                      % 5% padding
+    yL = (-1 - pad)*maxAbs * [-1 1]; % symmetric ±(1+pad)*maxAbs
+    % (equivalently:) yL = [-1 1]*(1+pad)*maxAbs;
 
     % ---------- Figure: rows-only (one column) ----------
     nUsed = numel(usedRows);
@@ -167,6 +196,9 @@ for ii = 1:numel(evtIdx)
         plot(tRelMs, Y(k,:), 'LineWidth', lw, 'Color', col);
         xline(0,'--k','LineWidth',0.8); yline(0,':','Color',[0.7 0.7 0.7]);
 
+        % FIXED y-axis across all subplots in this figure
+        ylim(yL);
+
         titleStr = localTitle(ch, isActive, kept_channels);
         title(titleStr, 'FontSize',8);
 
@@ -177,15 +209,16 @@ for ii = 1:numel(evtIdx)
         else
             xlabel('ms');
         end
-        ylabel('μV');
+        ylabel('\muV'); % microvolts
     end
 
     % ---------- Super title + save ----------
-    titleStr = sprintf('Event %03d  |  Active channels: %d  |  Align: %s  |  Win: \\pm%.1f ms', ...
-                       e, nActive, alignMode, 1e3*HW/sfx);
+    titleStr = sprintf(['Event %03d  |  Active channels: %d  |  Align: %s  |  Win: \\pm%.1f ms  |  ', ...
+                        'Units: \\muV  |  yLim=\\pm%.1f'], ...
+                       e, nActive, alignMode, 1e3*HW/sfx, (1+pad)*maxAbs);
     sgtitle(tl, titleStr, 'FontSize',12, 'FontWeight','bold');
 
-    outPng = fullfile(outDir, sprintf('Evt%03d_%dch_align-%s_HW%ds_%dms_rows-only.png', ...
+    outPng = fullfile(outDir, sprintf('Evt%03d_%dch_align-%s_HW%ds_%dms_rows-only_uV_fixedY.png', ...
                     e, nActive, alignMode, HW, round(1e3*HW/sfx)));
     exportgraphics(f, outPng, 'Resolution', 220);
     close(f);
