@@ -163,12 +163,12 @@ for ii = 1:numel(evtIdx)
 
     % ---------- Compute FIXED y-limits for this figure (event), symmetric around 0 ----------
     % Compute FIXED y-limits (symmetric, increasing order)
-    maxAbs = max(abs(Y(:)));
-    if ~isfinite(maxAbs) || maxAbs==0, maxAbs = 1; end
-    pad   = 0.05;                            % 5% padding
-    span  = (1+pad) * maxAbs;
-    yL    = span * [-1 1];                   % [-span, +span]  <-- increasing
-    ylim(yL);
+maxAbs = max(abs(Y(:)));
+if ~isfinite(maxAbs) || maxAbs==0, maxAbs = 1; end
+pad   = 0.05;                            % 5% padding
+span  = (1+pad) * maxAbs;
+yL    = span * [-1 1];                   % [-span, +span]  <-- increasing
+ylim(yL);
 
 
     % ---------- Figure: rows-only (one column) ----------
