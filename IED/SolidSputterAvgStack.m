@@ -5,12 +5,8 @@ p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);
 p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
-<<<<<<< HEAD
-p.addParameter('peakPolarity','pos', @(s) any(strcmpi(s,{'abs','pos','neg'})));
-=======
 p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
 p.addParameter('align','midpoint', @(s) any(strcmpi(s,{'peak','midpoint'})));
->>>>>>> d717fb77c04d81ec1ca6ffc43818ace23da644c7
 p.addParameter('excelPath',"", @(s)ischar(s)||isstring(s));
 p.addParameter('saveDir',"", @(s)ischar(s)||isstring(s));
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
