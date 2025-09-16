@@ -222,10 +222,12 @@ fprintf('Done. Outputs in: %s\n', outDir);
         end
         fprintf('%s: used %d/%d events.\n', tag, numel(usedEvents), numel(evtList));
 
-        % Compute mean ± SEM per channel
-        for k = 1;nUsedCh = size(stacks{k},1); if nUsedCh>0
+        % Compute mean ± SEM per channel  ✅ FIXED
+        for k = 1:nCh
+            nUsedCh = size(stacks{k},1);
+            if nUsedCh > 0
                 MU(k,:) = mean(stacks{k}, 1, 'omitnan');
-                SE(k,:) = std( stacks{k}, 0, 1, 'omitnan') ./ sqrt(nUsedCh);
+                SE(k,:) = std(stacks{k}, 0, 1, 'omitnan') ./ sqrt(nUsedCh);
             end
         end
 
