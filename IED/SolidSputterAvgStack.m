@@ -49,7 +49,7 @@ p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);
 p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
-p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
+p.addParameter('peakPolarity','pos', @(s) any(strcmpi(s,{'abs','pos','neg'})));
 p.addParameter('excelPath',"", @(s)ischar(s)||isstring(s));
 p.addParameter('saveDir',"", @(s)ischar(s)||isstring(s));
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
