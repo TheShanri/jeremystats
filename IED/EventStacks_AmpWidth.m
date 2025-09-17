@@ -107,8 +107,8 @@ Nevents = NeventsAll;
 if ~isempty(maxEvents), Nevents = min(NeventsAll, maxEvents); end
 
 % --- Windows (samples & time axes) ---
-HWdisp   = max(1, round(displayHWms * sfx));      % display half-width in samples
-HWmet    = max(1, round(metricHWms  * sfx));      % metric half-width in samples (±5 ms)
+HWdisp   = max(1, round(displayHWms * sfx));      % display half-width
+HWmet    = max(1, round(metricHWms  * sfx));      % metrics half-width (±5 ms)
 tRelDisp = (-HWdisp:HWdisp) / sfx * 1e3;          % ms
 
 fprintf('EventStacks_AmpWidth: %d event rows (using %d), %d channels, sfx=%.1f Hz\n', ...
@@ -123,7 +123,7 @@ for e = 1:Nevents
     s0_ev = max(1, round(onSamp(rowXL)));
     s1_ev = min(nSamp, round(offSamp(rowXL)));
     if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
-    anchors(e) = round((s0_ev + s1_ev)/2);   % midpoint anchor for display
+    anchors(e) = round((s0_ev + s1_ev)/2);   % midpoint anchor
     validEvt(e) = true;
 end
 evtList = find(validEvt);
@@ -131,8 +131,8 @@ if isempty(evtList)
     warning('No usable events after bounds checks.'); return;
 end
 
+% Compute global y-limit
 if isempty(yLimMicroV)
-    % Robust global limit across all events/channels (percentile of |signal|)
     rob = 0;
     for ii = 1:numel(evtList)
         e = evtList(ii);
@@ -141,7 +141,8 @@ if isempty(yLimMicroV)
         s1_disp = min(nSamp, a + HWdisp);
         for k = 1:nCh
             ch = chList(k);
-            y = double(mf.d(ch, s0_disp:s1_disp)) * (numel(scaleToMicroV)>1 ? scaleToMicroV(ch) : scaleToMicroV); %#ok<*NASGU>
+            sc = scaleToMicroV; if numel(sc)>1, sc = sc(ch); end
+            y = double(mf.d(ch, s0_disp:s1_disp)) * sc;
             y = y(isfinite(y));
             if isempty(y), continue; end
             p = prctile(abs(y), yRobustPct);
@@ -226,13 +227,11 @@ for ii = 1:numel(evtList)
 
         % --- Plot ---
         nexttile(tl); hold on; box on; grid on;
-        if ~isempty(yplot)
-            plot(tRelDisp, yplot, 'LineWidth', 1.5);
-        end
+        if ~isempty(yplot), plot(tRelDisp, yplot, 'LineWidth', 1.5); end
         xline(0,'--k','LineWidth',0.9); yline(0,':','Color',[0.7 0.7 0.7]);
         ylim(yL_global);
 
-        % half-width markers: RED and thicker, plus red baseline segment
+        % half-width markers: RED
         if isfinite(tL_ms) && isfinite(tR_ms)
             xline(tL_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
             xline(tR_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
@@ -275,5 +274,7 @@ for ii = 1:numel(evtList)
 end
 end
 
-% --- tiny helper ---
-function s = tern(cond, a, b), if cond, s=a; else, s=b; end, end
+% --- helper ---
+function s = tern(cond, a, b)
+if cond, s = a; else, s = b; end
+end
