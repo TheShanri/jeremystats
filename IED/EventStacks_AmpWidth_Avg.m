@@ -328,8 +328,8 @@ function [G, robAll] = avgForGroup(evtList, tag)
     alignLabel = tern(alignMode=="midpoint","midpoint",sprintf('peak(ref=%s, +5ms max)',refLabel));
     statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
     chList_local = chList; scale_local = scaleToMicroV; %#ok<NASGU>
-    save(statsPath, 'tRelMs','chList_local','kept_channels','scale_local','halfWidthMs','metricHalfWidthMs','sfx', ...
-                    'alignLabel','G','refCh');
+    save(statsPath, 'tRelMs','chList_local','kept_channels','scale_local', ...
+                 'halfWidthMs','metricHWms','sfx','alignLabel','G','refCh');
     fprintf('Saved: %s\n', statsPath);
 end
 
