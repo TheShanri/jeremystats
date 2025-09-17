@@ -1,38 +1,33 @@
 function EventStacks_AmpWidth(excelPath, dataMatPath, varargin)
-% One PNG per event. Converts AD->µV, computes amplitude & half-width in ±5 ms,
-% and uses a SINGLE, FIXED y-axis across ALL events so plots are comparable.
 
-% ---------- Args ----------
 p = inputParser;
 p.addRequired('excelPath', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 
-% Data / channels / scaling
+% Data / channels / scaling (µV expected; keep scaleToMicroV=1 unless needed)
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
-p.addParameter('scaleToMicroV', NaN, @(x) isnumeric(x) && all(x>0)); % scalar or per-channel vector (µV per AD count)
-p.addParameter('adBitVolts', [], @(x) isempty(x) || (isnumeric(x) && all(x>0))); % alternative (V/bit); overrides scaleToMicroV if provided
+p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
 
-% Alignment (display center)
-p.addParameter('align','midpoint', @(s) any(strcmpi(s,{'midpoint','peak'})));  % midpoint preserves lags
+% Alignment of display center
+p.addParameter('align','midpoint', @(s) any(strcmpi(s,{'midpoint','peak'})));
 
 % Windows
-p.addParameter('displayHalfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);  % plotting window (±)
-p.addParameter('metricHalfWidthMs',  5e-3,  @(x)isfinite(x)&&x>0);  % metrics window  (±)  -- amplitude & half-width only here
+p.addParameter('displayHalfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);  % plotting (±30 ms)
+p.addParameter('metricHalfWidthMs',  5e-3,  @(x)isfinite(x)&&x>0);  % metrics (±5 ms)
 
 % Excel mapping & bounds
 p.addParameter('indexBase','auto', @(s) any(strcmpi(s,{'auto','zero','one'})));
 p.addParameter('evtOffset',0, @(x)isscalar(x)&&isfinite(x));
 p.addParameter('maxEvents',[], @(x) isempty(x) || (isscalar(x) && x>0));
 
-% Y-axis (global, fixed across ALL events)
-p.addParameter('yLimitMicroV', [], @(x) isempty(x) || (isscalar(x) && x>0));     % force fixed ±yLimit
-p.addParameter('yPercentile', 99.5, @(x) isscalar(x) && x>0 && x<=100);          % robust global scale if yLimitMicroV empty
-p.addParameter('yPadFrac', 0.10, @(x) isscalar(x) && x>=0 && x<1);               % padding fraction on y-limits
-p.addParameter('yFrom', 'display', @(s) any(strcmpi(s,{'display','metric'})));   % base y on display or metric window
-
 % Output
 p.addParameter('saveDir','', @(s)ischar(s)||isstring(s));
 p.addParameter('tag','ALL', @(s)ischar(s)||isstring(s));
+
+% Y-axis control (GLOBAL across all figures)
+p.addParameter('yLimMicroV', [], @(x) isempty(x) || (isscalar(x) && x>0)); % if set, use ±this value
+p.addParameter('yRobustPct', 99.5, @(x) isfinite(x) && x>0 && x<100);      % robust percentile if yLim not provided
+p.addParameter('yPadFrac', 0.10, @(x) isfinite(x) && x>=0 && x<=0.5);      % extra headroom
 
 p.parse(excelPath, dataMatPath, varargin{:});
 
@@ -40,31 +35,28 @@ excelPath      = string(p.Results.excelPath);
 dataMatPath    = string(p.Results.dataMatPath);
 channelIndices = p.Results.channelIndices;
 scaleToMicroV  = p.Results.scaleToMicroV;
-adBitVolts     = p.Results.adBitVolts;    % V/bit
 alignMode      = lower(string(p.Results.align));
 displayHWms    = p.Results.displayHalfWidthMs;
 metricHWms     = p.Results.metricHalfWidthMs;
 indexBase      = lower(string(p.Results.indexBase));
 evtOffset      = p.Results.evtOffset;
 maxEvents      = p.Results.maxEvents;
-yLimitMicroV   = p.Results.yLimitMicroV;
-yPct           = p.Results.yPercentile;
-yPad           = p.Results.yPadFrac;
-yFrom          = lower(string(p.Results.yFrom));
 saveDir        = string(p.Results.saveDir);
 tagStr         = string(p.Results.tag);
+yLimMicroV     = p.Results.yLimMicroV;
+yRobustPct     = p.Results.yRobustPct;
+yPadFrac       = p.Results.yPadFrac;
 
 assert(isfile(excelPath),  'Excel not found: %s', excelPath);
 assert(isfile(dataMatPath),'Data MAT not found: %s', dataMatPath);
 
-% ---------- Load raw data ----------
+% --- Load raw data (expecting µV unless scaled) ---
 mf = matfile(dataMatPath);
 try sfx = mf.sfx; catch, error('Missing "sfx" in data MAT.'); end
 nRowsAll = size(mf,'d',1);
 nSamp    = size(mf,'d',2);
 try kept_channels = mf.kept_channels; catch, kept_channels = []; end %#ok<NASGU>
 
-% Channel list
 if isempty(channelIndices)
     chList = 1:nRowsAll;
 else
@@ -73,30 +65,12 @@ else
 end
 nCh = numel(chList);
 
-% Output dir
 if saveDir==""
     [saveDir,~,~] = fileparts(excelPath);
 end
 if ~exist(saveDir,'dir'), mkdir(saveDir); end
 
-% ---------- Determine scale (AD -> µV) ----------
-if ~isempty(adBitVolts)
-    % adBitVolts is V/bit → µV/bit
-    scaleToMicroV = adBitVolts * 1e6;
-end
-if any(isnan(scaleToMicroV))
-    error(['You must specify conversion from AD->µV.\n' ...
-           'Pass ''scaleToMicroV'', e.g., 0.061035 (for ADBitVolts=6.1035e-8), or ''adBitVolts'' in V/bit.']);
-end
-% Allow per-channel vector
-if numel(scaleToMicroV) == 1
-    getScale = @(ch) scaleToMicroV;
-else
-    assert(numel(scaleToMicroV) >= max(chList), 'scaleToMicroV vector must have >= max(channel) elements.');
-    getScale = @(ch) scaleToMicroV(ch);
-end
-
-% ---------- Read Excel & normalize to sample indices ----------
+% --- Read Excel & normalize to sample indices ---
 T = readtable(excelPath, 'ReadVariableNames', true);
 canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
 i_onSamp  = find(strcmp(canon,'onsamp')  | strcmp(canon,'startsample') | strcmp(canon,'startsamp') | strcmp(canon,'on'), 1);
@@ -132,71 +106,68 @@ offSamp = max(1, min(offSamp, nSamp));
 Nevents = NeventsAll;
 if ~isempty(maxEvents), Nevents = min(NeventsAll, maxEvents); end
 
-% ---------- Windows ----------
-HWdisp   = max(1, round(displayHWms * sfx));      % display half-width (samples)
-HWmet    = max(1, round(metricHWms  * sfx));      % metrics half-width (samples)
-tRelDisp = (-HWdisp:HWdisp) / sfx * 1e3;          % ms axis for plotting
+% --- Windows (samples & time axes) ---
+HWdisp   = max(1, round(displayHWms * sfx));      % display half-width in samples
+HWmet    = max(1, round(metricHWms  * sfx));      % metric half-width in samples (±5 ms)
+tRelDisp = (-HWdisp:HWdisp) / sfx * 1e3;          % ms
 
-fprintf(['EventStacks_AmpWidth:\n  Events (rows in sheet) = %d (using %d)\n' ...
-         '  Channels = %d\n  sfx = %.1f Hz\n  display=±%.1f ms, metrics=±%.1f ms\n'], ...
-        NeventsAll, Nevents, nCh, sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx);
+fprintf('EventStacks_AmpWidth: %d event rows (using %d), %d channels, sfx=%.1f Hz\n', ...
+    NeventsAll, Nevents, nCh, sfx);
 
-% ---------- PASS 1: compute a FIXED y-limit for ALL events ----------
-if isempty(yLimitMicroV)
-    globalRob = 1;  % robust max abs
-    for e = 1:Nevents
-        rowXL = e + evtOffset;
-        if rowXL < 1 || rowXL > NeventsAll, continue; end
-        s0_ev = max(1, round(onSamp(rowXL)));
-        s1_ev = min(nSamp, round(offSamp(rowXL)));
-        if ~isfinite(s0_ev) || ~isfinite(s1_ev) || s1_ev <= s0_ev, continue; end
-
-        % center for display
-        anchor = round((s0_ev + s1_ev)/2);
-        if yFrom=="metric"
-            s0w = max(1, anchor - HWmet);  s1w = min(nSamp, anchor + HWmet);
-        else % "display"
-            s0w = max(1, anchor - HWdisp); s1w = min(nSamp, anchor + HWdisp);
-        end
-
-        for k = 1:nCh
-            ch = chList(k);
-            sc = getScale(ch);
-            y = double(mf.d(ch, s0w:s1w)) * sc;   % µV
-            if isempty(y), continue; end
-            a = abs(y(:));
-            if any(isfinite(a))
-                r = prctile(a, yPct);
-                if isfinite(r), globalRob = max(globalRob, r); end
-            end
-        end
-    end
-    yFix = (1+yPad) * globalRob;
-else
-    yFix = yLimitMicroV;  % user-specified
-end
-yL_fixed = [-yFix, yFix];
-fprintf('Fixed y-limits (all events): ±%.1f µV (based on %s window, %.1f%%-tile, pad=%.0f%%)\n', ...
-    yFix, yFrom, yPct, 100*yPad);
-
-% ---------- PASS 2: generate figures (one PNG per event) ----------
-nBad = 0;
+% --- Precompute anchors & global y-limit (consistent across ALL figures) ---
+anchors = nan(Nevents,1);
+validEvt = false(Nevents,1);
 for e = 1:Nevents
     rowXL = e + evtOffset;
-    if rowXL < 1 || rowXL > NeventsAll
-        continue;
-    end
+    if rowXL < 1 || rowXL > NeventsAll, continue; end
     s0_ev = max(1, round(onSamp(rowXL)));
     s1_ev = min(nSamp, round(offSamp(rowXL)));
-    if ~isfinite(s0_ev) || ~isfinite(s1_ev) || s1_ev <= s0_ev
-        nBad = nBad + 1; continue;
-    end
+    if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
+    anchors(e) = round((s0_ev + s1_ev)/2);   % midpoint anchor for display
+    validEvt(e) = true;
+end
+evtList = find(validEvt);
+if isempty(evtList)
+    warning('No usable events after bounds checks.'); return;
+end
 
-    anchor = round((s0_ev + s1_ev)/2);
+if isempty(yLimMicroV)
+    % Robust global limit across all events/channels (percentile of |signal|)
+    rob = 0;
+    for ii = 1:numel(evtList)
+        e = evtList(ii);
+        a = anchors(e);
+        s0_disp = max(1, a - HWdisp);
+        s1_disp = min(nSamp, a + HWdisp);
+        for k = 1:nCh
+            ch = chList(k);
+            y = double(mf.d(ch, s0_disp:s1_disp)) * (numel(scaleToMicroV)>1 ? scaleToMicroV(ch) : scaleToMicroV); %#ok<*NASGU>
+            y = y(isfinite(y));
+            if isempty(y), continue; end
+            p = prctile(abs(y), yRobustPct);
+            if isfinite(p) && p > rob, rob = p; end
+        end
+    end
+    if ~isfinite(rob) || rob==0, rob = 1; end
+    yMax = (1 + yPadFrac) * rob;
+else
+    yMax = yLimMicroV;
+end
+yL_global = [-yMax, +yMax];
+fprintf('Global y-limit set to ±%.1f µV (mode: %s)\n', yMax, tern(isempty(yLimMicroV),'robust','fixed'));
+
+% --- Iterate events and plot (1 PNG per event) ---
+for ii = 1:numel(evtList)
+    e = evtList(ii);
+    rowXL = e + evtOffset;
+    s0_ev = max(1, round(onSamp(rowXL)));
+    s1_ev = min(nSamp, round(offSamp(rowXL)));
+    anchor = anchors(e);
+
     s0_disp = max(1, anchor - HWdisp);
     s1_disp = min(nSamp, anchor + HWdisp);
 
-    % Figure (one per event)
+    % --- Figure (one per event) ---
     perRowPx = 92; basePx = 230; maxPx = 5200;
     figH = min(maxPx, basePx + perRowPx * nCh);
     f = figure('Color','w','Position',[60 60 980 figH],'Visible','off');
@@ -204,82 +175,71 @@ for e = 1:Nevents
 
     for k = 1:nCh
         ch = chList(k);
-        sc = getScale(ch);
+        sc = scaleToMicroV; if numel(sc)>1, sc = sc(ch); end
 
-        % display signal
-        yplot = double(mf.d(ch, s0_disp:s1_disp)) * sc;     % µV
+        % display segment (±display window)
+        yplot = double(mf.d(ch, s0_disp:s1_disp)) * sc;
 
-        % metrics window
+        % metrics segment (±5 ms window)
         s0_met = max(1, anchor - HWmet);
         s1_met = min(nSamp, anchor + HWmet);
-        ymet   = double(mf.d(ch, s0_met:s1_met)) * sc;      % µV
+        ymet  = double(mf.d(ch, s0_met:s1_met)) * sc;
 
-        % Compute amplitude (absolute extremum in ±5 ms) & half-width at half-amplitude
+        % amplitude = absolute extremum within ±5 ms; half-width at half-amplitude
         amp_uV = NaN; width_ms = NaN; tPk_ms = NaN; tL_ms = NaN; tR_ms = NaN; sgn = +1;
-
-        if ~isempty(ymet) && all(isfinite(ymet)) && numel(ymet) >= 5
-            [maxVal, kMax] = max(ymet);
-            [minVal, kMin] = min(ymet);
-
-            if abs(minVal) > abs(maxVal)
-                sgn    = -1;                   % negative-going selected
-                amp_uV = abs(minVal);          % magnitude from zero
-                pkRel  = kMin;
+        if ~isempty(ymet) && all(isfinite(ymet)) && numel(ymet) >= 3
+            [mx, kMax] = max(ymet);
+            [mn, kMin] = min(ymet);
+            if abs(mn) > abs(mx)
+                sgn = -1; amp_uV = abs(mn); pkRel = kMin;
             else
-                sgn    = +1;
-                amp_uV = abs(maxVal);
-                pkRel  = kMax;
+                sgn = +1; amp_uV = abs(mx); pkRel = kMax;
             end
 
-            h = 0.5 * amp_uV;                  % half-amplitude level
-            sig = sgn * ymet;                  % flip so selected peak is positive
+            h = 0.5 * amp_uV;     % half-amplitude level from zero
+            sig = sgn * ymet;     % make chosen peak positive
 
-            % left crossing
+            % Left crossing
             kL = pkRel;
             while kL > 1 && sig(kL) >= h, kL = kL - 1; end
             if kL >= 1 && (kL+1) <= numel(sig)
-                x0=kL; y0=sig(kL); x1=kL+1; y1=sig(kL+1);
-                left_ip = x0 + (h - y0) / (y1 - y0);
+                left_ip = kL + (h - sig(kL)) / (sig(kL+1) - sig(kL));
             else
                 left_ip = NaN;
             end
-            % right crossing
-            kR = pkRel; Lsig = numel(sig);
-            while kR < Lsig && sig(kR) >= h, kR = kR + 1; end
-            if (kR-1) >= 1 && kR <= Lsig
-                x0=kR-1; y0=sig(kR-1); x1=kR; y1=sig(kR);
-                right_ip = x0 + (h - y0) / (y1 - y0);
+            % Right crossing
+            kR = pkRel; L = numel(sig);
+            while kR < L && sig(kR) >= h, kR = kR + 1; end
+            if (kR-1) >= 1 && kR <= L
+                right_ip = (kR-1) + (h - sig(kR-1)) / (sig(kR) - sig(kR-1));
             else
                 right_ip = NaN;
             end
 
             if isfinite(left_ip) && isfinite(right_ip) && right_ip > left_ip
-                width_samp = right_ip - left_ip;
-                width_ms   = (width_samp / sfx) * 1e3;
-
-                % Convert metric indices to display time (ms)
-                tPk_ms = ((s0_met + pkRel    - 1) - anchor) / sfx * 1e3;
-                tL_ms  = ((s0_met + left_ip  - 1) - anchor) / sfx * 1e3;
-                tR_ms  = ((s0_met + right_ip - 1) - anchor) / sfx * 1e3;
+                width_ms = (right_ip - left_ip) / sfx * 1e3;
+                tPk_ms   = ((s0_met + pkRel    - 1) - anchor) / sfx * 1e3;
+                tL_ms    = ((s0_met + left_ip  - 1) - anchor) / sfx * 1e3;
+                tR_ms    = ((s0_met + right_ip - 1) - anchor) / sfx * 1e3;
             end
         end
 
-        % Plot
+        % --- Plot ---
         nexttile(tl); hold on; box on; grid on;
         if ~isempty(yplot)
             plot(tRelDisp, yplot, 'LineWidth', 1.5);
         end
         xline(0,'--k','LineWidth',0.9); yline(0,':','Color',[0.7 0.7 0.7]);
-        ylim(yL_fixed);
+        ylim(yL_global);
 
-        % half-width markers (red) + base segment
+        % half-width markers: RED and thicker, plus red baseline segment
         if isfinite(tL_ms) && isfinite(tR_ms)
             xline(tL_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
             xline(tR_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
             plot([tL_ms tR_ms],[0 0], '-', 'Color',[0.85 0.10 0.10], 'LineWidth',1.4, 'HandleVisibility','off');
         end
 
-        % peak dot
+        % peak dot (if within display window)
         if isfinite(tPk_ms) && tPk_ms >= tRelDisp(1) && tPk_ms <= tRelDisp(end) && isfinite(amp_uV)
             plot(tPk_ms, sgn*amp_uV, 'o', 'MarkerSize', 4.5, ...
                  'MarkerFaceColor',[0 0 0], 'MarkerEdgeColor','none', 'HandleVisibility','off');
@@ -307,14 +267,13 @@ for e = 1:Nevents
                  e, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, nCh, tagStr);
     sgtitle(tl, sg, 'FontSize',12,'FontWeight','bold');
 
-    outPng = fullfile(saveDir, sprintf('Evt%03d_Stack_ampHW_fixedY_dispHW%ds_metHW%ds.png', ...
+    outPng = fullfile(saveDir, sprintf('Evt%03d_Stack_ampHW_globalY_dispHW%ds_metHW%ds.png', ...
         e, HWdisp, HWmet));
     exportgraphics(f, outPng, 'Resolution', 220);
     close(f);
     fprintf('Saved: %s\n', outPng);
 end
+end
 
-if nBad>0
-    fprintf('Skipped %d event(s) (bad/missing indices/out-of-bounds).\n', nBad);
-end
-end
+% --- tiny helper ---
+function s = tern(cond, a, b), if cond, s=a; else, s=b; end, end
