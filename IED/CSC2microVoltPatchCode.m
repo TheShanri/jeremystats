@@ -1,52 +1,69 @@
-function CSC2microVoltPatchCode(filePath)
-%CSC2microVoltPatchCode  Convert saved Neuralynx CSC data (AD units) to microvolts
+function CSC2microVoltPatchCode(filePath, varargin)
+%CSC2microVoltPatchCode Convert saved Neuralynx CSC data (AD units) to microvolts.
 %
-% Usage:
-%    CSC2microVoltPatchCode('C:\data\CSC1.mat')
+% Usage examples:
+%   CSC2microVoltPatchCode("C:\path\file.mat")
+%   CSC2microVoltPatchCode('C:\path\file.mat','var','d')  % if you know the var name
+%
+% Inputs:
+%   filePath : string or char, .mat file containing AD-unit data
+%   'var'    : (optional) name of variable to scale (default: largest numeric array)
+%
+% Output:
+%   Saves <original>_uV.mat next to the input, with the selected variable scaled to µV
+%
+% Note: ADBitVolts taken from your header = 0.00000006103515625 V/AD
 
-    if nargin < 1
-        [fname, fdir] = uigetfile('*.mat','Select CSC .mat file');
-        if isequal(fname,0), return; end
-        filePath = fullfile(fdir,fname);
-    end
+    p = inputParser;
+    p.addRequired('filePath', @(s)ischar(s)||isstring(s));
+    p.addParameter('var', '', @(s)ischar(s)||isstring(s));
+    p.parse(filePath, varargin{:});
 
-    % ---- parameters ----
-    ADBitVolts = 0.00000006103515625;  % volts per AD
+    filePath = p.Results.filePath;
+    varName  = p.Results.var;
+
+    % ---- constants ----
+    ADBitVolts = 0.00000006103515625;  % volts per AD unit
     scaleFactor = ADBitVolts * 1e6;    % microvolts per AD
 
-    % ---- load the .mat ----
+    % ---- load ----
     S = load(filePath);
     vars = fieldnames(S);
 
-    % assume the main signal is the largest numeric array
-    sz = cellfun(@numel, struct2cell(S));
-    [~, idx] = max(sz);
-    sigName = vars{idx};
-    rawSig = S.(sigName);
+    if isempty(varName)
+        % Pick the largest numeric array
+        isNum = cellfun(@(v) isnumeric(S.(v)), vars);
+        if ~any(isNum)
+            error('No numeric variables found in file: %s', string(filePath));
+        end
+        numCounts = zeros(numel(vars),1);
+        for i = 1:numel(vars)
+            if isNum(i)
+                numCounts(i) = numel(S.(vars{i}));
+            end
+        end
+        [~, idx] = max(numCounts);
+        sigName = vars{idx};
+    else
+        sigName = char(varName);
+        if ~isfield(S, sigName)
+            error('Variable "%s" not found in file: %s', sigName, string(filePath));
+        end
+        if ~isnumeric(S.(sigName))
+            error('Variable "%s" is not numeric.', sigName);
+        end
+    end
 
     % ---- scale ----
-    microV = rawSig * scaleFactor;
+    S.(sigName) = S.(sigName) * scaleFactor;   % in microvolts
+    S.([sigName '_units']) = 'microvolts';
 
-    % ---- save back (append "_uV" to variable) ----
-    S.(sigName) = microV;
-    newName = [sigName '_uV'];
-    S.(newName) = microV;
-
-    [fdir,fname,ext] = fileparts(filePath);
+    % ---- save as *_uV.mat in same dir ----
+    [fdir,fname,ext] = fileparts(char(filePath));
     outFile = fullfile(fdir, [fname '_uV' ext]);
-    save(outFile,'-struct','S','-v7.3');
 
-    fprintf('Saved microvolt-scaled data to:\n%s\n', outFile);
+    % 'save' wants char filename; also keep struct unpack with -struct
+    save(char(outFile), '-struct', 'S', '-v7.3');
+
+    fprintf('Scaled "%s" to microvolts and saved:\n%s\n', sigName, outFile);
 end
-
-
-%%main
-Error using save
-Argument must be a text scalar.
-
-Error in CSC2microVoltPatchCode (line 37)
-    save(outFile,'-struct','S','-v7.3');
-
-Error in main (line 12)
-CSC2microVoltPatchCode("C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
- 
