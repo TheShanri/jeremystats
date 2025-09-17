@@ -6,11 +6,13 @@ p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);
 p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
 p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
-p.addParameter('align','midpoint', @(s) any(strcmpi(s,{'peak','midpoint'})));
+p.addParameter('align','midpoint', @(s) any(strcmpi(s,{'peak','midpoint'})));  % default: preserve temporality
 p.addParameter('excelPath',"", @(s)ischar(s)||isstring(s));
 p.addParameter('saveDir',"", @(s)ischar(s)||isstring(s));
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
 p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
+p.addParameter('evtOffset', 0, @(x)isscalar(x)&&isfinite(x));      % set to +1 only if your sheet is shifted
+p.addParameter('indexBase', 'auto', @(s) any(strcmpi(s,{'auto','zero','one'}))); % spreadsheet sample indices base
 p.parse(inputFolder, dataMatPath, varargin{:});
 
 inputFolder     = string(p.Results.inputFolder);
@@ -23,6 +25,8 @@ excelPath       = string(p.Results.excelPath);
 saveDir         = string(p.Results.saveDir);
 channelIndices  = p.Results.channelIndices;
 maxEventsPerGrp = p.Results.maxEventsPerGroup;
+evtOffset       = p.Results.evtOffset;
+indexBase       = lower(string(p.Results.indexBase));
 
 solidDir   = fullfile(inputFolder, "Solid");
 sputterDir = fullfile(inputFolder, "Sputter");
@@ -59,17 +63,45 @@ tRelSamples = -HW:HW;
 tRelMs = (tRelSamples / sfx) * 1e3;
 winN = numel(tRelSamples);
 
+% ----- Read & normalize spreadsheet to sample indices -----
 T = readtable(excelPath, 'ReadVariableNames', true);
-if width(T) < 2, error('Excel must have at least 2 columns: [startIdx, endIdx].'); end
-startIdxCol = T{:,1};
-endIdxCol   = T{:,2};
-if ~isnumeric(startIdxCol) || ~isnumeric(endIdxCol)
-    error('First two columns must be numeric sample indices.');
-end
-NrowsXL = height(T);
+canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
+i_onSamp  = find(strcmp(canon,'onsamp')  | strcmp(canon,'startsample') | strcmp(canon,'startsamp') | strcmp(canon,'on'), 1);
+i_offSamp = find(strcmp(canon,'offsamp') | strcmp(canon,'endsample')   | strcmp(canon,'endsamp')   | strcmp(canon,'off'), 1);
+i_onSec   = find(strcmp(canon,'onsec')   | strcmp(canon,'startsec')    | strcmp(canon,'onsecs'), 1);
+i_offSec  = find(strcmp(canon,'offsec')  | strcmp(canon,'endsec')      | strcmp(canon,'offsecs'), 1);
 
+if ~isempty(i_onSamp) && ~isempty(i_offSamp)
+    onSamp  = double(T{:, i_onSamp});
+    offSamp = double(T{:, i_offSamp});
+elseif ~isempty(i_onSec) && ~isempty(i_offSec)
+    onSamp  = round(double(T{:, i_onSec})  * sfx);
+    offSamp = round(double(T{:, i_offSec}) * sfx);
+else
+    if width(T) < 2, error('Excel must have [on_samp, off_samp] or [on_sec, off_sec].'); end
+    onSamp  = double(T{:,1});
+    offSamp = double(T{:,2});
+end
+
+switch indexBase
+    case "zero"
+        onSamp  = onSamp + 1; offSamp = offSamp + 1;
+    case "auto"
+        if any(onSamp < 1 | offSamp < 1 | onSamp==0 | offSamp==0)
+            onSamp  = onSamp + 1; offSamp = offSamp + 1;
+        end
+    case "one"
+        % no-op
+end
+
+NrowsXL = numel(onSamp);
+onSamp  = max(1, min(onSamp,  nSamp));
+offSamp = max(1, min(offSamp, nSamp));
+
+% ----- Event lists from PNG names -----
 evtSOL = unique(parseEvtNumsFromPngs(solidDir));
 evtSPU = unique(parseEvtNumsFromPngs(sputterDir));
+fprintf('Found %d SOLID events, %d SPUTTER events from filenames.\n', numel(evtSOL), numel(evtSPU));
 if ~isempty(maxEventsPerGrp)
     evtSOL = evtSOL(1:min(end, maxEventsPerGrp));
     evtSPU = evtSPU(1:min(end, maxEventsPerGrp));
@@ -79,18 +111,17 @@ end
 [muSPU, seSPU, usedSPU] = avgForGroup(evtSPU, 'SPUTTER');
 
 alignLabel = tern(alignMode=="midpoint","midpoint",sprintf('peak(%s)',peakPolarity));
-
-plotStack(muSOL, seSOL, 'SOLID', numel(usedSOL), alignLabel);
-plotStack(muSPU, seSPU, 'SPUTTER', numel(usedSPU), alignLabel);
+plotStack(muSOL, seSOL, 'SOLID', usedSOL, alignLabel);
+plotStack(muSPU, seSPU, 'SPUTTER', usedSPU, alignLabel);
 
 fprintf('Done. Outputs in: %s\n', outDir);
 
+% ---------- helpers ----------
     function evts = parseEvtNumsFromPngs(dirpath)
         L = dir(fullfile(dirpath, '*.png'));
         evts = [];
         for k = 1:numel(L)
-            nm = L(k).name;
-            m = regexp(nm, 'Evt(\d+)', 'tokens', 'once');
+            m = regexp(L(k).name, 'Evt(\d+)', 'tokens', 'once');
             if ~isempty(m)
                 ev = str2double(m{1});
                 if isfinite(ev), evts(end+1) = ev; end %#ok<AGROW>
@@ -114,14 +145,24 @@ fprintf('Done. Outputs in: %s\n', outDir);
         nBad = 0;
         for ii = 1:numel(evtList)
             e = evtList(ii);
-            rowXL = e + 1;
+
+            % map event -> spreadsheet row
+            rowXL = e + evtOffset;
             if rowXL < 1 || rowXL > NrowsXL
-                nBad = nBad+1; continue;
+                alt = e;
+                if alt >= 1 && alt <= NrowsXL
+                    rowXL = alt;
+                else
+                    nBad = nBad + 1; 
+                    continue;
+                end
             end
-            s0_ev = max(1, round(startIdxCol(rowXL)));
-            s1_ev = min(nSamp, round(endIdxCol(rowXL)));
-            if ~isfinite(s0_ev) || ~isfinite(s1_ev) || s1_ev<=s0_ev
-                nBad = nBad+1; continue;
+
+            s0_ev = max(1, round(onSamp(rowXL)));
+            s1_ev = min(nSamp, round(offSamp(rowXL)));
+            if ~isfinite(s0_ev) || ~isfinite(s1_ev) || s1_ev <= s0_ev
+                nBad = nBad + 1; 
+                continue;
             end
 
             if alignMode == "midpoint"
@@ -133,7 +174,7 @@ fprintf('Done. Outputs in: %s\n', outDir);
                 ch = chList(k);
 
                 if alignMode == "midpoint"
-                    anchor = anchorMid;
+                    anchor = anchorMid;   % same anchor for all channels (preserve temporality)
                 else
                     yseg = double(mf.d(ch, s0_ev:s1_ev));
                     if any(~isfinite(yseg)), continue; end
@@ -148,7 +189,7 @@ fprintf('Done. Outputs in: %s\n', outDir);
                 s0 = anchor - HW; s1 = anchor + HW;
                 if s0 < 1 || s1 > nSamp, continue; end
 
-                y = double(mf.d(ch, s0:s1)) * scaleToMicroV;
+                y = double(mf.d(ch, s0:s1)) * scaleToMicroV; % µV
                 if any(~isfinite(y)), continue; end
 
                 stacks{k}(end+1, :) = y; %#ok<AGROW>
@@ -157,6 +198,11 @@ fprintf('Done. Outputs in: %s\n', outDir);
 
             if okAnyCh
                 usedEvents(end+1) = e; %#ok<AGROW>
+                if numel(usedEvents) <= 5
+                    fprintf('%s evt %d -> row %d | on=%d off=%d (len=%d samp, %.2f ms)%s\n', ...
+                        tag, e, rowXL, s0_ev, s1_ev, s1_ev - s0_ev + 1, 1e3*(s1_ev - s0_ev + 1)/sfx, ...
+                        tern(alignMode=="midpoint", sprintf(' | anchorMid=%d', anchorMid), ''));
+                end
             end
         end
 
@@ -174,7 +220,7 @@ fprintf('Done. Outputs in: %s\n', outDir);
         end
     end
 
-    function plotStack(MU, SE, tag, nEvents, alignLabel)
+    function plotStack(MU, SE, tag, usedEvents, alignLabel)
         if isempty(MU)
             warning('%s: no data to plot.', tag);
             return;
@@ -200,24 +246,24 @@ fprintf('Done. Outputs in: %s\n', outDir);
             end
             ylim(yL);
             ch = chList(k);
-            ttlTxt = localTitle(ch, kept_channels);
-            title(ttlTxt,'FontSize',8);
+            title(localTitle(ch, kept_channels),'FontSize',8);
             ax = gca; ax.FontSize = 8;
             if k < nCh, ax.XTickLabel = []; else, xlabel('ms'); end
             ylabel('\muV');
         end
 
         sg = sprintf('%s | align: %s | Win: \\pm%.1f ms | nEvents=%d | yLim=\\pm%.1f \\muV', ...
-            tag, alignLabel, 1e3*HW/sfx, nEvents, (1+pad)*maxAbs);
+            tag, alignLabel, 1e3*HW/sfx, numel(usedEvents), (1+pad)*maxAbs);
         sgtitle(tl, sg, 'FontSize',12,'FontWeight','bold');
 
+        alignTag = regexprep(alignLabel, '[^a-zA-Z0-9]+','_');
         outPng = fullfile(outDir, sprintf('AvgStack_%s_align-%s_HW%ds_%dms_rows-only_uV_fixedY.png', ...
-            tag, strrep(alignLabel,'(','_'), HW, round(1e3*HW/sfx)));
+            tag, alignTag, HW, round(1e3*HW/sfx)));
         exportgraphics(f, outPng, 'Resolution', 220);
         close(f);
 
         statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
-        save(statsPath, 'MU','SE','tRelMs','chList','kept_channels','scaleToMicroV','halfWidthMs','sfx','alignLabel','nEvents');
+        save(statsPath, 'MU','SE','tRelMs','chList','kept_channels','scaleToMicroV','halfWidthMs','sfx','alignLabel','usedEvents');
         fprintf('Saved: %s\n', outPng);
         fprintf('Saved: %s\n', statsPath);
     end
