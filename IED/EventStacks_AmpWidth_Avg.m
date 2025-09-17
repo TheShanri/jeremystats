@@ -9,7 +9,7 @@ p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=
 p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
 
 % Alignment & windows
-p.addParameter('align','midpoint', @(s) any(strcmpi(s,{'midpoint','peak'})));
+p.addParameter('align','peak', @(s) any(strcmpi(s,{'midpoint','peak'})));
 p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
 p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);      % ± averaging/plot window
 p.addParameter('metricHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0); % ± window for amp/HW metrics
