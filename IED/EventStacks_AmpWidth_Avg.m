@@ -1,31 +1,29 @@
-function EventStacks_AmpWidth_Avg(inputFolder, dataMatPath, varargin)
-% Build SOLID/SPUTTER per-channel averaged stacks with amplitude & half-width stats.
+function EventStacks_AmpWidth(inputFolder, dataMatPath, varargin)
 
-% ---------- Args ----------
 p = inputParser;
 p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 
-% Data / channels / scaling (assume µV unless you pass a scale)
+% Data / channels / scaling (assumes µV in mf.d unless you pass a scale)
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
 p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
 
 % Alignment & windows
 p.addParameter('align','midpoint', @(s) any(strcmpi(s,{'midpoint','peak'})));
 p.addParameter('peakPolarity','abs', @(s) any(strcmpi(s,{'abs','pos','neg'})));
-p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);     % ± window for averaging/plotting
-p.addParameter('metricHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0);% ± window for amp/HW metrics
+p.addParameter('halfWidthMs', 30e-3, @(x)isfinite(x)&&x>0);      % ± averaging/plot window
+p.addParameter('metricHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0); % ± window for amp/HW metrics
 
 % Spreadsheet + mapping
 p.addParameter('excelPath',"", @(s)ischar(s)||isstring(s));
 p.addParameter('indexBase','auto', @(s) any(strcmpi(s,{'auto','zero','one'})));
-p.addParameter('evtOffset',0, @(x)isscalar(x)&&isfinite(x));      % add to event index to get Excel row
+p.addParameter('evtOffset',0, @(x)isscalar(x)&&isfinite(x));
 p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
 
 % Output + y-axis
 p.addParameter('saveDir',"", @(s)ischar(s)||isstring(s));
 p.addParameter('tag','ALL', @(s)ischar(s)||isstring(s));
-p.addParameter('yLimMicroV', [], @(x) isempty(x) || (isscalar(x) && x>0)); % if set: use ±this value everywhere
+p.addParameter('yLimMicroV', [], @(x) isempty(x) || (isscalar(x) && x>0)); % fixed ± limit
 p.addParameter('yRobustPct', 99.5, @(x) isfinite(x) && x>0 && x<100);      % robust percentile if auto
 p.addParameter('yPadFrac', 0.10, @(x) isfinite(x) && x>=0 && x<=0.5);      % headroom
 
@@ -51,7 +49,7 @@ yLimMicroV      = p.Results.yLimMicroV;
 yRobustPct      = p.Results.yRobustPct;
 yPadFrac        = p.Results.yPadFrac;
 
-% ---------- Layout (Solid/Sputter folders + Excel) ----------
+% --- Layout ---
 solidDir   = fullfile(inputFolder, "Solid");
 sputterDir = fullfile(inputFolder, "Sputter");
 assert(isfolder(solidDir),   'Missing folder: %s', solidDir);
@@ -64,7 +62,7 @@ if excelPath == ""
 end
 assert(isfile(excelPath), 'Excel not found: %s', excelPath);
 
-% ---------- Data ----------
+% --- Data ---
 assert(isfile(dataMatPath), 'Data MAT not found: %s', dataMatPath);
 mf = matfile(dataMatPath);
 try sfx = mf.sfx; catch, error('Missing "sfx" in data MAT.'); end
@@ -83,17 +81,18 @@ nCh = numel(chList);
 if saveDir == "", outDir = inputFolder; else, outDir = char(saveDir); end
 if ~exist(outDir,'dir'), mkdir(outDir); end
 
-% ---------- Windows ----------
-HWdisp = max(1, round(halfWidthMs * sfx));     % averaging/plot window (±)
-HWmet  = max(1, round(metricHWms  * sfx));     % metric window (±)
+% --- Windows ---
+HWdisp   = max(1, round(halfWidthMs * sfx));   % averaging/plot window half-width (samples)
+HWmet    = max(1, round(metricHWms  * sfx));   % metric window half-width (samples)
 tRelSamp = -HWdisp:HWdisp;
 tRelMs   = (tRelSamp / sfx) * 1e3;
 winN     = numel(tRelSamp);
+centerIdx= HWdisp + 1;
 
-fprintf('EventStacks_AmpWidth (Avg): sfx=%.1f Hz | plot ±%.1f ms | metrics ±%.1f ms | align=%s\n', ...
+fprintf('Avg SOLID/SPUTTER: sfx=%.1f Hz | plot ±%.1f ms | metrics ±%.1f ms | align=%s\n', ...
         sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, alignMode);
 
-% ---------- Read spreadsheet -> on/off in samples ----------
+% --- Spreadsheet -> samples ---
 T = readtable(excelPath, 'ReadVariableNames', true);
 canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
 i_onSamp  = find(strcmp(canon,'onsamp')  | strcmp(canon,'startsample') | strcmp(canon,'startsamp') | strcmp(canon,'on'), 1);
@@ -127,20 +126,21 @@ NrowsXL = numel(onSamp);
 onSamp  = max(1, min(onSamp,  nSamp));
 offSamp = max(1, min(offSamp, nSamp));
 
-% ---------- Event lists from folder PNG names ----------
+% --- Events from PNG names ---
 evtSOL = unique(parseEvtNumsFromPngs(solidDir));
 evtSPU = unique(parseEvtNumsFromPngs(sputterDir));
-fprintf('Found %d SOLID events, %d SPUTTER events from filenames.\n', numel(evtSOL), numel(evtSPU));
+fprintf('Found %d SOLID, %d SPUTTER events (by filenames).\n', numel(evtSOL), numel(evtSPU));
+
 if ~isempty(maxEventsPerGrp)
     evtSOL = evtSOL(1:min(end, maxEventsPerGrp));
     evtSPU = evtSPU(1:min(end, maxEventsPerGrp));
 end
 
-% ---------- Build stats for both groups ----------
+% --- Build group stats ---
 [SOL, robSOL] = avgForGroup(evtSOL, 'SOLID');
 [SPU, robSPU] = avgForGroup(evtSPU, 'SPUTTER');
 
-% ---------- Global y-limit across BOTH figures ----------
+% --- Global y-limit across BOTH figures ---
 if isempty(yLimMicroV)
     rob = max([robSOL, robSPU, 1]);
     yMax = (1 + yPadFrac) * rob;
@@ -150,9 +150,9 @@ end
 yL_global = [-yMax, +yMax];
 fprintf('Global y-limit (both figs): ±%.1f µV (%s)\n', yMax, tern(isempty(yLimMicroV),'robust','fixed'));
 
-% ---------- Plot & save ----------
-plotStack(SOL, 'SOLID', yL_global);
-plotStack(SPU, 'SPUTTER', yL_global);
+% --- Plot & save (with indicators on the MEAN waveform) ---
+plotStackWithIndicators(SOL, 'SOLID', yL_global);
+plotStackWithIndicators(SPU, 'SPUTTER', yL_global);
 
 fprintf('Done. Outputs in: %s\n', outDir);
 
@@ -172,27 +172,23 @@ function evts = parseEvtNumsFromPngs(dirpath)
 end
 
 function [G, robAll] = avgForGroup(evtList, tag)
-% Returns structure G with fields per channel:
-%   MU (1xwinN), SE (1xwinN), nUsed, ampMean, ampSD, hwMean, hwSD, usedEvents
-% Also returns robAll = robust |signal| percentile for y-lim suggestion.
-
+% Per-channel aggregates:
+%   MU (1×winN), SE (1×winN), nUsed, ampMean/SD, hwMean/SD (from per-event metrics)
+% Also returns robAll = robust |signal| percentile for y-limit suggestion.
     G.MU  = nan(nCh, winN);
     G.SE  = nan(nCh, winN);
     G.n   = zeros(nCh,1);
-    G.ampMean = nan(nCh,1);
-    G.ampSD   = nan(nCh,1);
-    G.hwMean  = nan(nCh,1);
-    G.hwSD    = nan(nCh,1);
+    G.ampMean = nan(nCh,1); G.ampSD = nan(nCh,1);
+    G.hwMean  = nan(nCh,1); G.hwSD  = nan(nCh,1);
     G.usedEvents = [];
-    G.tRelMs  = tRelMs; %#ok<STRNU>
+    G.tRelMs = tRelMs; %#ok<STRNU>
     robAll = 0;
 
     if isempty(evtList)
-        warning('%s: no events.', tag);
-        return;
+        warning('%s: no events.', tag); return;
     end
 
-    stacks = cell(nCh,1);   % waveforms per channel (rows=events)
+    stacks = cell(nCh,1);   % per-event windows for averaging
     amps   = cell(nCh,1);   % per-event amplitudes (µV)
     hws    = cell(nCh,1);   % per-event half-widths (ms)
     for i=1:nCh, stacks{i} = []; amps{i} = []; hws{i} = []; end
@@ -200,25 +196,15 @@ function [G, robAll] = avgForGroup(evtList, tag)
     nBad = 0;
     for ii = 1:numel(evtList)
         e = evtList(ii);
-        % Map event id -> spreadsheet row
         rowXL = e + evtOffset;
         if rowXL < 1 || rowXL > NrowsXL
             alt = e;
-            if alt >= 1 && alt <= NrowsXL
-                rowXL = alt;
-            else
-                nBad = nBad + 1;
-                continue;
-            end
+            if alt >= 1 && alt <= NrowsXL, rowXL = alt; else, nBad=nBad+1; continue; end
         end
-
         s0_ev = max(1, round(onSamp(rowXL)));
         s1_ev = min(nSamp, round(offSamp(rowXL)));
-        if ~isfinite(s0_ev) || ~isfinite(s1_ev) || s1_ev <= s0_ev
-            nBad = nBad + 1; continue;
-        end
+        if ~isfinite(s0_ev) || ~isfinite(s1_ev) || s1_ev <= s0_ev, nBad=nBad+1; continue; end
 
-        % Shared midpoint anchor unless aligning by per-channel peak
         ancMid = round((s0_ev + s1_ev)/2);
 
         okAnyCh = false;
@@ -240,22 +226,22 @@ function [G, robAll] = avgForGroup(evtList, tag)
                 anchor = s0_ev + kp - 1;
             end
 
-            % Averaging window
+            % averaging window
             s0 = anchor - HWdisp; s1 = anchor + HWdisp;
             if s0 < 1 || s1 > nSamp, continue; end
-            y = double(mf.d(ch, s0:s1)) * sc;    % µV
+            y = double(mf.d(ch, s0:s1)) * sc;
             if any(~isfinite(y)), continue; end
             stacks{k}(end+1,:) = y; %#ok<AGROW>
             okAnyCh = true;
 
-            % Robust y-lim accumulator
+            % robust y-limit helper
             p = prctile(abs(y), yRobustPct);
             if isfinite(p) && p > robAll, robAll = p; end
 
-            % Metrics window (±metric)
+            % metrics window (±metric)
             s0m = max(1, anchor - HWmet);
             s1m = min(nSamp, anchor + HWmet);
-            ym  = double(mf.d(ch, s0m:s1m)) * sc;   % µV
+            ym  = double(mf.d(ch, s0m:s1m)) * sc;
             if numel(ym) >= 3 && all(isfinite(ym))
                 [mx, kMax] = max(ym);
                 [mn, kMin] = min(ym);
@@ -267,28 +253,22 @@ function [G, robAll] = avgForGroup(evtList, tag)
                 h = 0.5*amp; sig = sgn*ym;
 
                 % left crossing
-                kL = pkRel;
-                while kL > 1 && sig(kL) >= h, kL = kL - 1; end
+                kL = pkRel; while kL > 1 && sig(kL) >= h, kL = kL - 1; end
                 if kL >= 1 && (kL+1) <= numel(sig)
                     left_ip = kL + (h - sig(kL)) / (sig(kL+1) - sig(kL));
-                else
-                    left_ip = NaN;
-                end
+                else, left_ip = NaN; end
                 % right crossing
                 kR = pkRel; L = numel(sig);
                 while kR < L && sig(kR) >= h, kR = kR + 1; end
                 if (kR-1) >= 1 && kR <= L
                     right_ip = (kR-1) + (h - sig(kR-1)) / (sig(kR) - sig(kR-1));
-                else
-                    right_ip = NaN;
-                end
+                else, right_ip = NaN; end
 
                 if isfinite(left_ip) && isfinite(right_ip) && right_ip > left_ip
                     hw_ms = (right_ip - left_ip) / sfx * 1e3;
                 else
                     hw_ms = NaN;
                 end
-
                 amps{k}(end+1,1) = amp; %#ok<AGROW>
                 hws{k}(end+1,1)  = hw_ms; %#ok<AGROW>
             else
@@ -300,43 +280,37 @@ function [G, robAll] = avgForGroup(evtList, tag)
         if okAnyCh
             G.usedEvents(end+1) = e; %#ok<AGROW>
             if numel(G.usedEvents) <= 5
-                fprintf('%s evt %d -> row %d | on=%d off=%d (%.2f ms) | anchorMid=%d\n', ...
-                    tag, e, rowXL, s0_ev, s1_ev, 1e3*(s1_ev - s0_ev + 1)/sfx, ancMid);
+                fprintf('%s evt %d -> row %d | on=%d off=%d (%.2f ms)\n', ...
+                    tag, e, rowXL, s0_ev, s1_ev, 1e3*(s1_ev - s0_ev + 1)/sfx);
             end
         end
     end
 
-    if nBad>0
-        fprintf('%s: skipped %d event(s) due to bad/missing indices/out-of-bounds.\n', tag, nBad);
-    end
+    if nBad>0, fprintf('%s: skipped %d event(s) (bad/missing/out-of-bounds).\n', tag, nBad); end
     fprintf('%s: used %d/%d events.\n', tag, numel(G.usedEvents), numel(evtList));
 
-    % Per-channel aggregate stats
+    % aggregate per channel
     for k = 1:nCh
-        X = stacks{k};
-        nUsed = size(X,1);
-        G.n(k) = nUsed;
+        X = stacks{k}; nUsed = size(X,1); G.n(k) = nUsed;
         if nUsed > 0
             G.MU(k,:) = mean(X, 1, 'omitnan');
-            G.SE(k,:) = std( X, 0, 1, 'omitnan') ./ sqrt(nUsed);
+            G.SE(k,:) = std( X, 0, 1, 'omitnan') ./ sqrt(nUsed); % SEM
         end
-
         a = amps{k}; w = hws{k};
         if ~isempty(a), G.ampMean(k) = mean(a, 'omitnan'); G.ampSD(k) = std(a, 0, 'omitnan'); end
         if ~isempty(w), G.hwMean(k)  = mean(w, 'omitnan'); G.hwSD(k)  = std(w,  0, 'omitnan'); end
     end
 
-    % Save stats MAT for this group
+    % save stats
     alignLabel = tern(alignMode=="midpoint","midpoint",sprintf('peak(%s)',peakPolarity));
     statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
-    chList_local = chList; %#ok<NASGU>
-    scale_local  = scaleToMicroV; %#ok<NASGU>
+    chList_local = chList; scale_local = scaleToMicroV; %#ok<NASGU>
     save(statsPath, 'tRelMs','chList_local','kept_channels','scale_local','halfWidthMs','metricHWms','sfx', ...
                     'alignLabel','G');
     fprintf('Saved: %s\n', statsPath);
 end
 
-function plotStack(G, tag, yL)
+function plotStackWithIndicators(G, tag, yL)
     if isempty(G) || all(all(isnan(G.MU))), warning('%s: no data to plot.', tag); return; end
 
     nRowsGrid = nCh;
@@ -344,6 +318,11 @@ function plotStack(G, tag, yL)
     figH = min(maxPx, basePx + perRowPx * nRowsGrid);
     f = figure('Color','w','Position',[60 60 980 figH],'Visible','off');
     tl = tiledlayout(f, nRowsGrid, 1, 'Padding','compact','TileSpacing','compact');
+
+    % metric subrange indices within mean vector
+    metStart = max(1, centerIdx - HWmet);
+    metEnd   = min(winN, centerIdx + HWmet);
+    Lmet     = metEnd - metStart + 1;
 
     for k = 1:nCh
         mu = G.MU(k,:); se = G.SE(k,:);
@@ -355,12 +334,58 @@ function plotStack(G, tag, yL)
             yp = [yu,      fliplr(yl)];
             patch('XData',xp,'YData',yp,'FaceColor',[0.3 0.3 0.9],'FaceAlpha',0.25,'EdgeColor','none','HandleVisibility','off');
             plot(tRelMs, mu, 'LineWidth', 1.8);
+
+            % ---- Indicators computed on MEAN waveform within ±metric window ----
+            muMet = mu(metStart:metEnd);
+            if numel(muMet) >= 3 && all(isfinite(muMet))
+                [mx, kMax] = max(muMet);
+                [mn, kMin] = min(muMet);
+                if abs(mn) > abs(mx)
+                    sgn = -1; amp = abs(mn); pkRel = kMin;
+                else
+                    sgn = +1; amp = abs(mx); pkRel = kMax;
+                end
+                h = 0.5 * amp; sig = sgn * muMet;
+
+                % left crossing
+                kL = pkRel;
+                while kL > 1 && sig(kL) >= h, kL = kL - 1; end
+                if kL >= 1 && (kL+1) <= Lmet
+                    left_ip = kL + (h - sig(kL)) / (sig(kL+1) - sig(kL));
+                else
+                    left_ip = NaN;
+                end
+                % right crossing
+                kR = pkRel;
+                while kR < Lmet && sig(kR) >= h, kR = kR + 1; end
+                if (kR-1) >= 1 && kR <= Lmet
+                    right_ip = (kR-1) + (h - sig(kR-1)) / (sig(kR) - sig(kR-1));
+                else
+                    right_ip = NaN;
+                end
+
+                if isfinite(left_ip) && isfinite(right_ip)
+                    % convert fractional sample indices -> time (ms)
+                    tPk_ms = ((metStart + pkRel - 1) - centerIdx) / sfx * 1e3;
+                    tL_ms  = ((metStart + left_ip  - 1) - centerIdx) / sfx * 1e3;
+                    tR_ms  = ((metStart + right_ip - 1) - centerIdx) / sfx * 1e3;
+
+                    % vertical red half-width lines + red baseline segment
+                    xline(tL_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
+                    xline(tR_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
+                    plot([tL_ms tR_ms],[0 0], '-', 'Color',[0.85 0.10 0.10], 'LineWidth',1.4, 'HandleVisibility','off');
+
+                    % peak dot on mean curve
+                    plot(tPk_ms, sgn*amp, 'o', 'MarkerSize', 4.5, ...
+                         'MarkerFaceColor',[0 0 0], 'MarkerEdgeColor','none', 'HandleVisibility','off');
+                end
+            end
         end
 
-        xline(0,'--k','LineWidth',0.8); yline(0,':','Color',[0.7 0.7 0.7]);
+        xline(0,'--k','LineWidth',0.9); yline(0,':','Color',[0.7 0.7 0.7]);
         ylim(yL);
 
-        % Title (includes amp/HW mean±SD)
+        % Title (per-event stats mean±SD)
         if ~isempty(kept_channels)
             chName = sprintf('row %d (CSC%d)', chList(k), kept_channels(chList(k)));
         else
@@ -384,7 +409,7 @@ function plotStack(G, tag, yL)
                  tag, alignLabel, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, nCh, tagStr);
     sgtitle(tl, sg, 'FontSize',12,'FontWeight','bold');
 
-    outPng = fullfile(outDir, sprintf('AvgStack_%s_align-%s_HW%ds_%dms_globalY.png', ...
+    outPng = fullfile(outDir, sprintf('AvgStack_%s_align-%s_HW%ds_%dms_globalY_indicators.png', ...
         tag, regexprep(alignLabel,'[^a-zA-Z0-9]+','_'), HWdisp, round(1e3*HWdisp/sfx)));
     exportgraphics(f, outPng, 'Resolution', 220);
     close(f);
