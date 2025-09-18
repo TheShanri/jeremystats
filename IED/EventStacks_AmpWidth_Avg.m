@@ -205,7 +205,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
         warning('%s: no events.', tag); return;
     end
 
-    stacks = cell(nCh,1);   % per-event windows for averaging
+    stacks = cell(nCh,1);   % per-event windows for averaging (each row = one event)
     amps   = cell(nCh,1);   % per-event amplitudes (µV), using positive peak only
     hws    = cell(nCh,1);   % per-event half-widths (ms)
     for i=1:nCh, stacks{i} = []; amps{i} = []; hws{i} = []; end
@@ -318,7 +318,6 @@ function [G, robAll] = avgForGroup(evtList, tag)
     fprintf('%s: used %d/%d events.\n', tag, numel(G.usedEvents), numel(evtList));
 
     % Aggregate per channel
-    % --- inside avgForGroup(), near "Aggregate per channel" ---
     for k = 1:nCh
         X = stacks{k}; 
         nUsed = size(X,1); 
@@ -332,13 +331,17 @@ function [G, robAll] = avgForGroup(evtList, tag)
         if ~isempty(w), G.hwMean(k)  = mean(w, 'omitnan'); G.hwSD(k)  = std(w,  0, 'omitnan'); end
     end
 
+    % Keep raw contributing traces for faint overlay in plots
+    G.traces = stacks;
 
-    % Save stats
+    % Save stats (strip heavy traces to keep files small)
     alignLabel = sprintf('first-channel max (±%.1f ms)', 1e3*HWanchor/sfx);
     statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
     chList_local = chList; scale_local = scaleToMicroV; %#ok<NASGU>
+    Gsave = G;
+    if isfield(Gsave,'traces'), Gsave = rmfield(Gsave,'traces'); end
     save(statsPath, 'tRelMs','chList_local','kept_channels','scale_local','halfWidthMs','metricHWms','sfx', ...
-                    'alignLabel','G');
+                    'alignLabel','Gsave');
     fprintf('Saved: %s\n', statsPath);
 end
 
@@ -362,6 +365,18 @@ function plotStackWithIndicators(G, tag, yL)
     for k = 1:nCh
         mu = G.MU(k,:); se = G.SE(k,:);
         nexttile(tl); hold on; box on; grid on;
+
+        % ---- FAINT OVERLAY of contributing event traces (if present) ----
+        if isfield(G, 'traces') && numel(G.traces) >= k && ~isempty(G.traces{k})
+            Yk = G.traces{k};  % [nEventsUsed x winN]
+            % Use a light gray for outlines; thinner lines so mean stands out
+            for r = 1:size(Yk,1)
+                y = Yk(r,:);
+                if any(isfinite(y))
+                    plot(tRelMs, y, 'LineWidth', 0.5, 'Color', [0.65 0.65 0.65]); % faint outline
+                end
+            end
+        end
 
         if any(isfinite(mu))
             % mean ± SEM patch
