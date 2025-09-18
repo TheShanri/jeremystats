@@ -318,8 +318,11 @@ function [G, robAll] = avgForGroup(evtList, tag)
     fprintf('%s: used %d/%d events.\n', tag, numel(G.usedEvents), numel(evtList));
 
     % Aggregate per channel
-    for k = 1;nCh
-        X = stacks{k}; nUsed = size(X,1); G.n(k) = nUsed;
+    % --- inside avgForGroup(), near "Aggregate per channel" ---
+    for k = 1:nCh
+        X = stacks{k}; 
+        nUsed = size(X,1); 
+        G.n(k) = nUsed;
         if nUsed > 0
             G.MU(k,:) = mean(X, 1, 'omitnan');
             G.SE(k,:) = std( X, 0, 1, 'omitnan') ./ max(1,sqrt(nUsed)); % SEM
@@ -328,6 +331,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
         if ~isempty(a), G.ampMean(k) = mean(a, 'omitnan'); G.ampSD(k) = std(a, 0, 'omitnan'); end
         if ~isempty(w), G.hwMean(k)  = mean(w, 'omitnan'); G.hwSD(k)  = std(w,  0, 'omitnan'); end
     end
+
 
     % Save stats
     alignLabel = sprintf('first-channel max (±%.1f ms)', 1e3*HWanchor/sfx);
