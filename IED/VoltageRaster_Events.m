@@ -233,12 +233,13 @@ function renderGroup(evtList, outDir, tag)
 
         % ---- Color limits (symmetric) ----
         if isempty(climMicroV)
-            p = prctile(abs(Y(:)), yRobustPct, 'all', 'omitnan');
-            if ~isfinite(p) || p<=0, p = 1; end
-            clim = (1 + climPadFrac) * p;
-        else
-            clim = climMicroV;
-        end
+    p = prctile(abs(Y(:)), yRobustPct, 'all', 'omitnan');
+    if ~isfinite(p) || p<=0, p = 1; end
+    clim = (1 + climPadFrac) * p;
+else
+    clim = climMicroV;
+end
+
 
         % ---- Plot raster ----
         perRowPx = 10; basePx = 200; maxPx = 2400;
@@ -251,12 +252,12 @@ function renderGroup(evtList, outDir, tag)
         colormap(jet); colorbar;
 
         xlabel('Time (ms)');
-        if isempty(kept_channels)
-            yticks = 1:nCh; yticklabels(arrayfun(@(k) sprintf('row %d', chList(k)), 1:nCh, 'UniformOutput',false));
-        else
-            yticks = 1:nCh; yticklabels(arrayfun(@(k) sprintf('row %d (CSC%d)', chList(k), kept_channels(chList(k))), 1:nCh, 'UniformOutput',false));
-        end
-        set(gca,'YTick',yticks,'YTickLabel',yticklabels,'FontSize',9);
+if isempty(kept_channels)
+    L = arrayfun(@(k) sprintf('row %d', chList(k)), 1:nCh, 'UniformOutput',false);
+else
+    L = arrayfun(@(k) sprintf('row %d (CSC%d)', chList(k), kept_channels(chList(k))), 1:nCh, 'UniformOutput',false);
+end
+set(gca, 'YTick', 1:nCh, 'YTickLabel', L, 'FontSize', 9);
 
         ttl = sprintf('%s  |  Evt %d  |  anchor=%s  |  window=\\pm%.1f ms  |  channels=%d', ...
             tag, e, char(anchorMode), 1e3*HWwin/sfx, nCh);
