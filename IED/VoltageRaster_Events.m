@@ -1,6 +1,6 @@
 function VoltageRaster_Events(inputFolder, dataMatPath, varargin)
 % VoltageRaster_Events
-% Make a voltage raster (channels x time) for EACH event in a 20 ms window,
+% Make a voltage raster (channels x time) for EACH event in a 40 ms window,
 % saving per-event PNGs into:
 %   <inputFolder> / "Voltage Raster Output" / Solid
 %   <inputFolder> / "Voltage Raster Output" / Sputter
@@ -13,6 +13,9 @@ function VoltageRaster_Events(inputFolder, dataMatPath, varargin)
 % within ±5 ms around the event midpoint (computed from Excel on/off columns).
 % Optionally set anchorMode='midpoint' to center exactly on the midpoint.
 %
+% Global CLim (color scale) is computed across **all** events (Solid+Sputter)
+% so plots are comparable.
+%
 % INPUTS
 %   inputFolder   : folder containing "Solid" and "Sputter" subfolders and the Excel file
 %   dataMatPath   : MAT with fields d [nRows x nSamp], sfx (Hz), kept_channels (optional)
@@ -23,17 +26,14 @@ function VoltageRaster_Events(inputFolder, dataMatPath, varargin)
 %   'scaleToMicroV'     : scalar or per-row vector to scale raw units -> µV (default 1)
 %   'anchorMode'        : 'firstChMax' (default) or 'midpoint'
 %   'anchorHalfWidthMs' : ±ms to search the anchor around midpoint (default 5e-3)
-%   'winHalfWidthMs'    : half window for raster in seconds (default 10e-3 → 20 ms total)
-%   'climMicroV'        : fixed symmetric color limit (±value). If empty, auto-robust.
+%   'winHalfWidthMs'    : half window for raster in seconds (default 20e-3 → 40 ms total)
+%   'climMicroV'        : fixed symmetric color limit (±value). If empty, auto-robust global.
 %   'yRobustPct'        : robust |signal| percentile for auto CLim (default 99.5)
 %   'climPadFrac'       : fractional headroom added to CLim (default 0.12)
 %   'maxEventsPerGroup' : optional cap on # of events per group for output
 %
 % OUTPUT
 %   Saves PNG rasters: "Raster_Evt%03d.png" under the Solid/Sputter output dirs.
-%
-% EXAMPLE
-%   VoltageRaster_Events('C:\Exp1', 'C:\Exp1\data.mat', 'anchorMode','midpoint');
 
 % ---------------- Args ----------------
 p = inputParser;
@@ -47,7 +47,9 @@ p.addParameter('scaleToMicroV', 1, @(x)isnumeric(x) && all(isfinite(x)) && all(x
 p.addParameter('anchorMode','firstChMax', @(s) any(strcmpi(s,{'firstChMax','midpoint'})));
 p.addParameter('anchorHalfWidthMs', 5e-3,  @(x)isfinite(x)&&x>0);
 
-p.addParameter('winHalfWidthMs', 10e-3,     @(x)isfinite(x)&&x>0); % ±10 ms -> 20 ms total
+% *** Expanded to ±20 ms by default ***
+p.addParameter('winHalfWidthMs', 20e-3,     @(x)isfinite(x)&&x>0);
+
 p.addParameter('climMicroV', [],            @(x) isempty(x) || (isscalar(x) && x>0));
 p.addParameter('yRobustPct', 99.5,          @(x) isfinite(x) && x>0 && x<100);
 p.addParameter('climPadFrac', 0.12,         @(x) isfinite(x) && x>=0 && x<=0.5);
@@ -66,7 +68,7 @@ anchorMode    = lower(string(p.Results.anchorMode));
 anchorHWms    = p.Results.anchorHalfWidthMs;
 
 winHalfMs     = p.Results.winHalfWidthMs;
-climMicroV    = p.Results.climMicroV;
+climMicroVOpt = p.Results.climMicroV;
 yRobustPct    = p.Results.yRobustPct;
 climPadFrac   = p.Results.climPadFrac;
 
@@ -117,7 +119,7 @@ else
 end
 
 % ---------------- Windows ----------------
-HWwin    = max(1, round(winHalfMs   * sfx)); % ± display window (±10 ms by default)
+HWwin    = max(1, round(winHalfMs   * sfx)); % ± display window (±20 ms by default)
 HWanchor = max(1, round(anchorHWms  * sfx)); % ± anchor search (5 ms default)
 tRelMs   = (-HWwin:HWwin) / sfx * 1e3;
 winN     = numel(tRelMs);
@@ -160,9 +162,28 @@ if ~isempty(maxEventsPer)
     evtSPU = evtSPU(1:min(end, maxEventsPer));
 end
 
-% ---------------- Render groups ----------------
-renderGroup(evtSOL, outSOL, 'SOLID');
-renderGroup(evtSPU, outSPU, 'SPUTTER');
+% ---------------- Global CLim across ALL events (Solid + Sputter) ----------------
+if isempty(climMicroVOpt)
+    pvals = [];
+    fprintf('Scanning events to compute global CLim (percentile %.2f%%)...\n', yRobustPct);
+    pvals = [pvals; scanPercentiles(evtSOL)]; %#ok<AGROW>
+    pvals = [pvals; scanPercentiles(evtSPU)]; %#ok<AGROW>
+    if isempty(pvals) || all(~isfinite(pvals))
+        pvalGlobal = 1;
+    else
+        % Use the MAX of per-event percentiles so no image clips
+        pvalGlobal = max(pvals(isfinite(pvals)));
+        if ~isfinite(pvalGlobal) || pvalGlobal <= 0, pvalGlobal = 1; end
+    end
+    climGlobal = (1 + climPadFrac) * pvalGlobal;
+else
+    climGlobal = climMicroVOpt;
+end
+fprintf('Global CLim set to ±%.2f µV.\n', climGlobal);
+
+% ---------------- Render groups with GLOBAL CLim ----------------
+renderGroup(evtSOL, outSOL, 'SOLID', climGlobal);
+renderGroup(evtSPU, outSPU, 'SPUTTER', climGlobal);
 
 fprintf('Done. Output in: %s\n', outRoot);
 
@@ -170,7 +191,56 @@ fprintf('Done. Output in: %s\n', outRoot);
 %                                HELPERS
 % ======================================================================
 
-function renderGroup(evtList, outDir, tag)
+function pvec = scanPercentiles(evtList)
+    % Iterate events; compute per-event robust percentile over |Y|; return vector
+    pvec = nan(numel(evtList),1);
+    for ii = 1:numel(evtList)
+        e = evtList(ii);
+        rowXL = e;
+        if rowXL < 1 || rowXL > NrowsXL, continue; end
+
+        s0_ev = round(onSamp(rowXL));
+        s1_ev = round(offSamp(rowXL));
+        if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
+
+        % ---- Anchor ----
+        switch anchorMode
+            case "midpoint"
+                anchor = round((s0_ev + s1_ev)/2);
+            otherwise
+                ancMid  = round((s0_ev + s1_ev)/2);
+                s0a     = max(1, ancMid - HWanchor);
+                s1a     = min(nSamp, ancMid + HWanchor);
+                refCh   = chList(1);
+                yseg0   = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
+                if isempty(yseg0) || all(~isfinite(yseg0)), continue; end
+                [~, k_rel] = max(yseg0);
+                anchor = s0a + k_rel - 1;
+        end
+
+        s0 = anchor - HWwin;
+        s1 = anchor + HWwin;
+        if s0 < 1 || s1 > nSamp, continue; end
+
+        % Accumulate abs values channel by channel, but only keep percentile robustly
+        % We compute percentile on the concatenation to avoid bias by NaNs
+        vv = [];
+        for k = 1:nCh
+            ch = chList(k);
+            sc = scaleVec(ch);
+            y  = double(mf.d(ch, s0:s1)) * sc;
+            if ~isempty(y)
+                y = y(isfinite(y));
+                if ~isempty(y), vv = [vv; abs(y(:))]; end %#ok<AGROW>
+            end
+        end
+        if ~isempty(vv)
+            pvec(ii) = prctile(vv, yRobustPct); % legacy-compatible syntax
+        end
+    end
+end
+
+function renderGroup(evtList, outDir, tag, clim)
     if isempty(evtList)
         warning('%s: no events to render.', tag);
         return;
@@ -231,30 +301,13 @@ function renderGroup(evtList, outDir, tag)
             continue;
         end
 
-        % ---- Color limits (symmetric) ----
-        if isempty(climMicroV)
-            v = abs(Y(:));
-            v = v(isfinite(v));                 % omit NaNs/Infs manually
-            if isempty(v)
-                pval = 1;
-            else
-                pval = prctile(v, yRobustPct);  % legacy-compatible syntax
-                if ~isfinite(pval) || pval <= 0
-                    pval = 1;
-                end
-            end
-            clim = (1 + climPadFrac) * pval;
-        else
-            clim = climMicroV;
-        end
-
-        % ---- Plot raster ----
+        % ---- Plot raster (GLOBAL CLim, 1 at TOP) ----
         perRowPx = 10; basePx = 200; maxPx = 2400;
         figH = min(maxPx, basePx + perRowPx * nCh);
         f = figure('Color','w','Position',[80 80 1000 figH],'Visible','off');
 
         imagesc(tRelMs, 1:nCh, Y);
-        set(gca, 'YDir', 'normal'); % channels from bottom to top
+        set(gca, 'YDir', 'reverse');  % <<< 1 at TOP, nCh at BOTTOM
         caxis([-clim, +clim]);
         colormap(jet); colorbar;
 
@@ -266,8 +319,8 @@ function renderGroup(evtList, outDir, tag)
         end
         set(gca,'YTick',1:nCh,'YTickLabel',L,'FontSize',9);
 
-        ttl = sprintf('%s  |  Evt %d  |  anchor=%s  |  window=\\pm%.1f ms  |  channels=%d', ...
-            tag, e, char(anchorMode), 1e3*HWwin/sfx, nCh);
+        ttl = sprintf('%s  |  Evt %d  |  anchor=%s  |  window=\\pm%.1f ms  |  channels=%d  |  CLim=\\pm%.1f \\muV', ...
+            tag, e, char(anchorMode), 1e3*HWwin/sfx, nCh, clim);
         title(ttl, 'FontSize', 12, 'FontWeight', 'bold');
 
         % ---- Save ----
