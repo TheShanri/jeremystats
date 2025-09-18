@@ -10,10 +10,10 @@ p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=
 p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
 
 % Alignment & windows
-% Anchor = argmax |signal| on first channel within ±2 ms around event midpoint
+% Anchor = max(signal) on first channel within ±5 ms around event midpoint
 p.addParameter('halfWidthMs',         10e-3, @(x)isfinite(x)&&x>0); % display/averaging half-width (±10 ms)
-p.addParameter('metricHalfWidthMs',    2e-3, @(x)isfinite(x)&&x>0); % metrics half-width (±2 ms)
-p.addParameter('anchorHalfWidthMs',    2e-3, @(x)isfinite(x)&&x>0); % ***anchor search half-width (±2 ms)***
+p.addParameter('metricHalfWidthMs',    5e-3, @(x)isfinite(x)&&x>0); % metrics half-width (±5 ms)
+p.addParameter('anchorHalfWidthMs',    5e-3, @(x)isfinite(x)&&x>0); % ***anchor search half-width (±5 ms)***
 
 % Spreadsheet + mapping
 p.addParameter('excelPath',"", @(s)ischar(s)||isstring(s));
@@ -90,7 +90,7 @@ tRelMs    = (tRelSamp / sfx) * 1e3;
 winN      = numel(tRelSamp);
 centerIdx = HWdisp + 1;
 
-fprintf(['EventStacks_AmpWidth (simple anchor): sfx=%.1f Hz | display ±%.1f ms | ' ...
+fprintf(['EventStacks_AmpWidth (positive-peak anchor): sfx=%.1f Hz | display ±%.1f ms | ' ...
          'metrics ±%.1f ms | anchorSearch ±%.1f ms | channels=%d\n'], ...
          sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, 1e3*HWanchor/sfx, nCh);
 
@@ -206,7 +206,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
     end
 
     stacks = cell(nCh,1);   % per-event windows for averaging
-    amps   = cell(nCh,1);   % per-event amplitudes (µV)
+    amps   = cell(nCh,1);   % per-event amplitudes (µV), using positive peak only
     hws    = cell(nCh,1);   % per-event half-widths (ms)
     for i=1:nCh, stacks{i} = []; amps{i} = []; hws{i} = []; end
 
@@ -229,7 +229,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
 
         ancMid = round((s0_ev + s1_ev)/2);  % event midpoint
 
-        % -------- COMMON ANCHOR from FIRST channel, STRICT (no fallback) --------
+        % -------- COMMON ANCHOR from FIRST channel, POSITIVE PEAK ONLY --------
         s0srch = max(1, ancMid - HWanchor);
         s1srch = min(nSamp, ancMid + HWanchor);
         yseg0  = double(mf.d(refCh, s0srch:s1srch)) * scaleToMicroV;
@@ -241,10 +241,10 @@ function [G, robAll] = avgForGroup(evtList, tag)
                  e, refCh, HWanchor, 1e3*HWanchor/sfx, ancMid, s0srch, s1srch);
         end
 
-        [~, k_rel] = max(abs(yseg0));               % argmax |signal|
+        [~, k_rel] = max(yseg0);  % <<< positive peak (no abs, no mins)
         if isempty(k_rel) || ~isfinite(k_rel)
             error('EventStacks:AnchorNotFound', ...
-                ['Failed to compute argmax(|signal|) for event %d on FIRST channel row %d within ±%d samples (±%.2f ms).'], ...
+                ['Failed to compute max(signal) for event %d on FIRST channel row %d within ±%d samples (±%.2f ms).'], ...
                  e, refCh, HWanchor, 1e3*HWanchor/sfx);
         end
         commonAnchor = s0srch + k_rel - 1;
@@ -266,32 +266,28 @@ function [G, robAll] = avgForGroup(evtList, tag)
             p = prctile(abs(y), yRobustPct);
             if isfinite(p) && p > robAll, robAll = p; end
 
-            % ---- Metrics (±2 ms) around COMMON anchor ----
+            % ---- Metrics (±5 ms) around COMMON anchor: POSITIVE PEAK ONLY ----
             s0m = max(1, commonAnchor - HWmet);
             s1m = min(nSamp, commonAnchor + HWmet);
             ym  = double(mf.d(ch, s0m:s1m)) * sc;
             if numel(ym) >= 3 && all(isfinite(ym))
-                [mx, kMax] = max(ym);
-                [mn, kMin] = min(ym);
-                if abs(mn) > abs(mx)
-                    sgn = -1; amp = abs(mn); pkRel = kMin;
-                else
-                    sgn = +1; amp = abs(mx); pkRel = kMax;
-                end
-                h = 0.5*amp; sig = sgn*ym;
+                [amp, pkRel] = max(ym);       % positive max amplitude (µV)
+                h = 0.5 * amp;                % half-height
 
-                % Left crossing (linear interpolation)
-                kL = pkRel; while kL > 1 && sig(kL) >= h, kL = kL - 1; end
-                if kL >= 1 && (kL+1) <= numel(sig)
-                    left_ip = kL + (h - sig(kL)) / (sig(kL+1) - sig(kL));
+                % Left crossing (linear interpolation) where ym falls below h
+                kL = pkRel;
+                while kL > 1 && ym(kL) >= h, kL = kL - 1; end
+                if kL >= 1 && (kL+1) <= numel(ym) && ym(kL) < h && ym(kL+1) >= h
+                    left_ip = kL + (h - ym(kL)) / (ym(kL+1) - ym(kL));
                 else
                     left_ip = NaN;
                 end
+
                 % Right crossing
-                kR = pkRel; L = numel(sig);
-                while kR < L && sig(kR) >= h, kR = kR + 1; end
-                if (kR-1) >= 1 && kR <= L
-                    right_ip = (kR-1) + (h - sig(kR-1)) / (sig(kR) - sig(kR-1));
+                kR = pkRel; Lm = numel(ym);
+                while kR < Lm && ym(kR) >= h, kR = kR + 1; end
+                if (kR-1) >= 1 && kR <= Lm && ym(kR-1) >= h && ym(kR) < h
+                    right_ip = (kR-1) + (h - ym(kR-1)) / (ym(kR) - ym(kR-1));
                 else
                     right_ip = NaN;
                 end
@@ -322,7 +318,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
     fprintf('%s: used %d/%d events.\n', tag, numel(G.usedEvents), numel(evtList));
 
     % Aggregate per channel
-    for k = 1:nCh
+    for k = 1;nCh
         X = stacks{k}; nUsed = size(X,1); G.n(k) = nUsed;
         if nUsed > 0
             G.MU(k,:) = mean(X, 1, 'omitnan');
@@ -334,7 +330,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
     end
 
     % Save stats
-    alignLabel = sprintf('first-channel argmax|signal| (±%.1f ms)', 1e3*HWanchor/sfx);
+    alignLabel = sprintf('first-channel max (±%.1f ms)', 1e3*HWanchor/sfx);
     statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
     chList_local = chList; scale_local = scaleToMicroV; %#ok<NASGU>
     save(statsPath, 'tRelMs','chList_local','kept_channels','scale_local','halfWidthMs','metricHWms','sfx', ...
@@ -371,27 +367,23 @@ function plotStackWithIndicators(G, tag, yL)
             patch('XData',xp,'YData',yp,'FaceColor',[0.3 0.3 0.9],'FaceAlpha',0.25,'EdgeColor','none','HandleVisibility','off');
             plot(tRelMs, mu, 'LineWidth', 1.8);
 
-            % ---- Indicators computed on MEAN waveform within ±metric window ----
+            % ---- Indicators computed on MEAN waveform within ±metric window (POSITIVE PEAK ONLY) ----
             muMet = mu(metStart:metEnd);
             if numel(muMet) >= 3 && all(isfinite(muMet))
-                [mx, kMax] = max(muMet);
-                [mn, kMin] = min(muMet);
-                if abs(mn) > abs(mx)
-                    sgn = -1; amp = abs(mn); pkRel = kMin;
-                else
-                    sgn = +1; amp = abs(mx); pkRel = kMax;
-                end
-                h  = 0.5 * amp; sig = sgn * muMet;
+                [amp, pkRel] = max(muMet);   % positive peak amplitude
+                h  = 0.5 * amp;              % half-height
 
-                % crossings (linear interp)
-                kL = pkRel; while kL > 1 && sig(kL) >= h, kL = kL - 1; end
-                if kL >= 1 && (kL+1) <= Lmet
-                    left_ip = kL + (h - sig(kL)) / (sig(kL+1) - sig(kL));
+                % crossings (linear interp) on muMet
+                kL = pkRel;
+                while kL > 1 && muMet(kL) >= h, kL = kL - 1; end
+                if kL >= 1 && (kL+1) <= Lmet && muMet(kL) < h && muMet(kL+1) >= h
+                    left_ip = kL + (h - muMet(kL)) / (muMet(kL+1) - muMet(kL));
                 else, left_ip = NaN; end
 
-                kR = pkRel; while kR < Lmet && sig(kR) >= h, kR = kR + 1; end
-                if (kR-1) >= 1 && kR <= Lmet
-                    right_ip = (kR-1) + (h - sig(kR-1)) / (sig(kR) - sig(kR-1));
+                kR = pkRel;
+                while kR < Lmet && muMet(kR) >= h, kR = kR + 1; end
+                if (kR-1) >= 1 && kR <= Lmet && muMet(kR-1) >= h && muMet(kR) < h
+                    right_ip = (kR-1) + (h - muMet(kR-1)) / (muMet(kR) - muMet(kR-1));
                 else, right_ip = NaN; end
 
                 if isfinite(left_ip) && isfinite(right_ip)
@@ -408,7 +400,7 @@ function plotStackWithIndicators(G, tag, yL)
                     end
 
                     if tPk_ms >= tRelMs(1) && tPk_ms <= tRelMs(end)
-                        plot(tPk_ms, sgn*amp, 'o', 'MarkerSize', 4.5, ...
+                        plot(tPk_ms, amp, 'o', 'MarkerSize', 4.5, ...
                              'MarkerFaceColor',[0 0 0], 'MarkerEdgeColor','none', 'HandleVisibility','off');
                     end
                 end
@@ -437,11 +429,11 @@ function plotStackWithIndicators(G, tag, yL)
         ylabel('\muV');
     end
 
-    sg = sprintf('%s  |  anchor: first-channel argmax|signal| (±%.1f ms)  |  display: \\pm%.1f ms  |  metrics: \\pm%.1f ms  |  channels=%d  |  %s', ...
+    sg = sprintf('%s  |  anchor: first-channel max (±%.1f ms)  |  display: \\pm%.1f ms  |  metrics: \\pm%.1f ms  |  channels=%d  |  %s', ...
                  tag, 1e3*HWanchor/sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, nCh, tagStr);
     sgtitle(tl, sg, 'FontSize',12,'FontWeight','bold');
 
-    outPng = fullfile(outDir, sprintf('AvgStack_%s_anchor-argmax_abs_disp%ds_met%ds_globalY_2col.png', ...
+    outPng = fullfile(outDir, sprintf('AvgStack_%s_anchor-max_disp%ds_met%ds_globalY_2col.png', ...
         tag, HWdisp, HWmet));
     exportgraphics(f, outPng, 'Resolution', 220);
     close(f);
