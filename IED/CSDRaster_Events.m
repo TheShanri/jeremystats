@@ -34,9 +34,6 @@ function CSDRaster_Events(inputFolder, dataMatPath, varargin)
 %
 % OUTPUT
 %   Saves PNG rasters: "RasterCSD_Evt%03d.png" under the Solid/Sputter output dirs.
-%
-% EXAMPLE
-%   CSDRaster_Events('C:\Exp1', 'C:\Exp1\data.mat', 'anchorMode','midpoint');
 
 % ---------------- Args ----------------
 p = inputParser;
@@ -50,7 +47,7 @@ p.addParameter('scaleToMicroV', 1, @(x)isnumeric(x) && all(isfinite(x)) && all(x
 p.addParameter('anchorMode','firstChMax', @(s) any(strcmpi(s,{'firstChMax','midpoint'})));
 p.addParameter('anchorHalfWidthMs', 5e-3,  @(x)isfinite(x)&&x>0);
 
-% *** ±20 ms window by default (to match your voltage rasters) ***
+% *** ±20 ms window by default ***
 p.addParameter('winHalfWidthMs', 20e-3,     @(x)isfinite(x)&&x>0);
 
 p.addParameter('climAbs', [],               @(x) isempty(x) || (isscalar(x) && x>0));
@@ -123,8 +120,8 @@ else
 end
 
 % ---------------- Windows ----------------
-HWwin    = max(1, round(winHalfMs   * sfx)); % ± display window (±20 ms by default)
-HWanchor = max(1, round(anchorHWms  * sfx)); % ± anchor search (5 ms default)
+HWwin    = max(1, round(winHalfMs   * sfx)); % ± display window (±20 ms)
+HWanchor = max(1, round(anchorHWms  * sfx)); % ± anchor search (5 ms)
 tRelMs   = (-HWwin:HWwin) / sfx * 1e3;
 winN     = numel(tRelMs);
 
@@ -233,8 +230,8 @@ function pvec = scanPercentiles(evtList)
         end
         if all(~isfinite(Y(:))), continue; end
 
-        % CSD expects (time x channels). My Y is (channels x time) → transpose.
-        [csd, ~, ~] = CSDPP2(Y', 'n', sfx); % 'n' = no plotting, thanks!
+        % CSD expects (time x channels). Y is (channels x time) → transpose.
+        [csd, ~, ~] = CSDPP2(Y', 'n', sfx); % 'n' = no plotting
         vv = abs(csd(:));
         vv = vv(isfinite(vv));
         if ~isempty(vv)
@@ -305,36 +302,33 @@ function renderGroup(evtList, outDir, tag, clim)
         end
 
         % ---- Compute CSD on (time x channels) ----
-        [csd, newtrange, newchrange] = CSDPP2(Y', 'n', sfx); %#ok<ASGLU> % keep the suspense
+        [csd, newtrange, newchrange] = CSDPP2(Y', 'n', sfx); %#ok<ASGLU>
 
         % ---- Plot raster (GLOBAL CLim, 1 at TOP) ----
         perRowPx = 10; basePx = 200; maxPx = 2400;
         figH = min(maxPx, basePx + perRowPx * nCh);
         f = figure('Color','w','Position',[80 80 1000 figH],'Visible','off');
 
-        % Note: CSDPP2 upsamples with interp2, so time axis length changed.
-        % We'll rebuild a ms axis from newtrange (which was in microseconds originally).
-        time_ms = newtrange * 1e-3;   % newtrange is µs in the classic code → ms here
-        imagesc(time_ms, 1:numel(newchrange), csd'); % channels are 2..N-1-ish after diff
-        set(gca, 'YDir', 'reverse');  % 1 at TOP, more at BOTTOM
+        % newtrange is µs (classic). Convert to ms for axes.
+        time_ms = newtrange * 1e-3;
+        imagesc(time_ms, 1:numel(newchrange), csd'); % channels as rows
+        set(gca, 'YDir', 'reverse');  % 1 at TOP, larger at bottom
         caxis([-clim, +clim]);
         colormap(jet); colorbar;
 
         xlabel('Time (ms)');
 
-        % Build rough labels: original chList goes 1..nCh; CSD reduces edges by 'step'
-        % We extended in CSDPP2 to output newchrange ~ [1.5..nCh-0.5] (ish). Map back.
-        L = arrayfun(@(kk) sprintf('row %d', kk), 1:numel(newchrange), 'UniformOutput',false);
-        if ~isempty(kept_channels) && numel(newchrange) <= numel(chList)
-            % try to index within valid range
-            baseIdx = max(1, min(numel(chList), round(newchrange)));
-            L = arrayfun(@(ii_) sprintf('row %d (CSC%d)', chList(baseIdx(ii_)), kept_channels(chList(baseIdx(ii_)))), ...
-                        1:numel(newchrange), 'UniformOutput',false);
-        end
-        set(gca,'YTick',1:numel(newchrange),'YTickLabel',L,'FontSize',9);
+        % Tick labels: keep it light to avoid clutter
+        nY = numel(newchrange);
+        nTicks = min(12, nY);
+        yTicks = round(linspace(1, nY, nTicks));
+        set(gca,'YTick',yTicks,'FontSize',9);
+        % Optional: annotate with "row k"
+        yTickLabels = arrayfun(@(k) sprintf('row %d', k), yTicks, 'UniformOutput', false);
+        set(gca,'YTickLabel', yTickLabels);
 
-        ttl = sprintf('%s  |  Evt %d  |  CSD (second spatial derivative)  |  anchor=%s  |  window=\\pm%.1f ms  |  ch=%d→%d  |  CLim=\\pm%.1f', ...
-            tag, e, char(anchorMode), 1e3*HWwin/sfx, nCh, numel(newchrange), clim);
+        ttl = sprintf('%s  |  Evt %d  |  CSD (second spatial derivative)  |  anchor=%s  |  window=\\pm%.1f ms  |  ch=%d  |  CLim=\\pm%.1f', ...
+            tag, e, char(anchorMode), 1e3*HWwin/sfx, nCh, clim);
         title(ttl, 'FontSize', 12, 'FontWeight', 'bold');
 
         % ---- Save ----
@@ -350,7 +344,7 @@ function evts = parseEvtNumsFromPngs(dirpath)
     evts = [];
     for k = 1:numel(L)
         m = regexp(L(k).name, 'Evt(\d+)', 'tokens', 'once');
-        if ~isEmpty(m)
+        if ~isempty(m)   % <<< FIXED: MATLAB uses isempty, not isEmpty
             ev = str2double(m{1});
             if isfinite(ev), evts(end+1) = ev; end %#ok<AGROW>
         end
