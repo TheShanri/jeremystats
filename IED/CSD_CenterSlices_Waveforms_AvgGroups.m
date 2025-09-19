@@ -1,22 +1,9 @@
 function CSD_CenterSlices_Waveforms_AvgGroups(inputFolder, dataMatPath, varargin)
 % CSD_CenterSlices_Waveforms_AvgGroups
-% For each group (SOLID, SPUTTER):
-%   • Align events by first channel's POSITIVE peak (±anchorHalfWidthMs) using Excel on/off windows
-%   • Compute per-event CSD in a ±winHalfWidthMs window
-%   • Extract the CSD slice at time = 0 ms (center of the aligned window)
-%   • FIGURE (per group):
-%       LEFT  : image of all per-event 0 ms CSD slices (channels × events), each repeated in X by 'sliceThickness'
-%       RIGHT : vertical-wave view (x = CSD value, y = channels), all events (thin gray) + mean (bold)
-%   • Common robust scaling for both panels (symmetric, shared between left/right inside each group)
-%
-% OUTPUT:
-%   <inputFolder>/CSD Center Slices Output/CSD_CenterSlices_SOLID.png
-%   <inputFolder>/CSD Center Slices Output/CSD_CenterSlices_SPUTTER.png
-%
-% REQUIRED in dataMat:
-%   d [nRows x nSamp], sfx (Hz). kept_channels optional (for labels).
-%
-% -------------------------------------------------------------------------
+% Left: per-event CSD slices at 0 ms, stacked as vertical tiles (channels x events)
+% Right: vertical waveform @ 0 ms (all events in gray, average in black)
+% Row alignment fix: single tiledlayout, shared Y axes, shared colorbar at layout level,
+% identical Y limits/ticks/fonts, zero loose insets. Channel 1 is at top.
 
 % ---------- Args ----------
 p = inputParser;
@@ -30,7 +17,7 @@ p.addParameter('scaleToMicroV', 1, @(x)isnumeric(x) && all(isfinite(x)) && all(x
 p.addParameter('winHalfWidthMs',    20e-3, @(x)isfinite(x)&&x>0);   % ±20 ms around anchor
 p.addParameter('anchorHalfWidthMs',  5e-3, @(x)isfinite(x)&&x>0);   % ±5 ms anchor search
 
-p.addParameter('sliceThickness', 6, @(x)isfinite(x) && x>=1 && mod(x,1)==0); % pixels/columns per event
+p.addParameter('sliceThickness', 6, @(x)isfinite(x) && x>=1 && mod(x,1)==0); % columns per event tile
 p.addParameter('robustPct',    99.5, @(x) isfinite(x) && x>0 && x<100);
 p.addParameter('padFrac',       0.12, @(x) isfinite(x) && x>=0 && x<=0.5);
 
@@ -99,7 +86,7 @@ end
 % ---------- Windows ----------
 HWwin    = max(1, round(winHWms    * sfx));  % ±display half-width
 HWanchor = max(1, round(anchorHWms * sfx));  % ±anchor search
-tRelMs   = (-HWwin:HWwin) / sfx * 1e3;       % centered at 0
+tRelMs   = (-HWwin:HWwin) / sfx * 1e3;
 centerIdx= HWwin + 1;
 
 fprintf('CSD Center Slices: sfx=%.1f Hz | window ±%.1f ms | anchor: firstCh max (±%.1f ms)\n', ...
@@ -124,7 +111,6 @@ else
     onSamp  = double(T{:,1});
     offSamp = double(T{:,2});
 end
-
 onSamp  = max(1, min(onSamp,  nSamp));
 offSamp = max(1, min(offSamp, nSamp));
 NrowsXL = numel(onSamp);
@@ -141,7 +127,6 @@ end
 % ---------- Build & render ----------
 buildAndRender(evtSOL, 'SOLID', outSOL);
 buildAndRender(evtSPU, 'SPUTTER', outSPU);
-
 fprintf('Saved:\n  %s\n  %s\n', outSOL, outSPU);
 
 % ============================= HELPERS =============================
@@ -152,7 +137,7 @@ fprintf('Saved:\n  %s\n  %s\n', outSOL, outSPU);
             return;
         end
 
-        S = nan(nCh, numel(evtList));  % per-event slice at 0 ms (channels x events)
+        S = nan(nCh, numel(evtList));  % per-event 0 ms CSD slice (channels x events)
         used = false(numel(evtList),1);
 
         for ii = 1:numel(evtList)
@@ -179,7 +164,7 @@ fprintf('Saved:\n  %s\n  %s\n', outSOL, outSPU);
             s1 = anchor + HWwin;
             if s0 < 1 || s1 > nSamp, continue; end
 
-            % Extract voltage block (channels x time) then CSD
+            % Extract block (channels x time) and CSD
             Y = nan(nCh, 2*HWwin+1);
             for k = 1:nCh
                 ch = chList(k);
@@ -201,79 +186,86 @@ fprintf('Saved:\n  %s\n  %s\n', outSOL, outSPU);
             return;
         end
 
-        S = S(:,used);          % keep only used
+        S = S(:,used);              % keep only used events
         nEvt = size(S,2);
         MU  = mean(S,2, 'omitnan'); % mean vertical waveform (channels)
 
-        % Robust symmetric scale (shared by both panels)
+        % Robust symmetric scale (shared by both panels in THIS group)
         vals = abs(S(:));
         vals = vals(isfinite(vals));
         if isempty(vals), pval = 1; else, pval = prctile(vals, robPct); end
         clim = (1 + padFrac) * max(1, pval);
 
-        % -------- Figure --------
-        % Taller figure to fit labels & title; 1 at top (YDir=reverse)
-        figH = min(300 + 14*nCh, 3200);
+        % -------- Figure (tight alignment) --------
+        figH = min(320 + 14*nCh, 3400);
         f = figure('Color','w','Position',[60 60 1200 figH],'Visible','off');
+
+        % One tiledlayout; add a LAYOUT-LEVEL colorbar (prevents tile size changes)
         tl = tiledlayout(f, 1, 2, 'Padding','compact', 'TileSpacing','compact');
 
-        % LEFT: slices “tiled” with thickness
-        nexttile(tl); 
-        hold on;
-        % Build a (channels x (events*thickness)) image by repeating each column
+        % Channel labels once (left only) to fix text width asymmetry
+        if isempty(kept_channels)
+            chanLabels = arrayfun(@(kk) sprintf('row %d', chList(kk)), 1:nCh, 'UniformOutput',false);
+        else
+            chanLabels = arrayfun(@(kk) sprintf('row %d (CSC%d)', chList(kk), kept_channels(chList(kk))), 1:nCh, 'UniformOutput',false);
+        end
+
+        % LEFT: per-event slices image (repeat columns = thickness)
+        ax1 = nexttile(tl); 
+        hold(ax1, 'on');
         if sliceThick==1
             Img = S;
         else
-            Img = repelem(S, 1, sliceThick); % repeat each event column sliceThick times
+            Img = repelem(S, 1, sliceThick);
         end
-        imagesc(1:size(Img,2), 1:nCh, Img);
-        set(gca,'YDir','reverse');
-        caxis([-clim, +clim]);
-        colormap(jet); 
-        colorbar;
-        % x ticks at event centers
+        imagesc(ax1, 1:size(Img,2), 1:nCh, Img);
+        set(ax1,'YDir','reverse', 'YLim',[0.5 nCh+0.5], 'TickDir','out', ...
+            'FontSize',9, 'YTick',1:nCh, 'YTickLabel',chanLabels, ...
+            'Box','on', 'Layer','top', 'TickLength',[0 0]);
+        caxis(ax1, [-clim, +clim]);
+        colormap(ax1, jet);
+        % Event centers on x
         if sliceThick >= 2
             centers = ( (0:nEvt-1)*sliceThick ) + ceil(sliceThick/2);
         else
             centers = 1:nEvt;
         end
-        xticks(centers);
-        xticklabels(string(1:nEvt));
-        xlabel('Event #');
-        % Channel labels
-        if isempty(kept_channels)
-            L = arrayfun(@(kk) sprintf('row %d', chList(kk)), 1:nCh, 'UniformOutput',false);
-        else
-            L = arrayfun(@(kk) sprintf('row %d (CSC%d)', chList(kk), kept_channels(chList(kk))), 1:nCh, 'UniformOutput',false);
-        end
-        set(gca,'YTick',1:nCh,'YTickLabel',L,'FontSize',9);
-        ylabel('Channel (1 at top)');
-        title(sprintf('%s — CSD slices at 0 ms (n=%d), CLim=\\pm%.2f', tag, nEvt, clim), 'FontSize', 10, 'FontWeight','bold');
+        xticks(ax1, centers); xticklabels(ax1, string(1:nEvt));
+        xlabel(ax1, 'Event #'); ylabel(ax1, 'Channel (1 at top)');
 
-        % RIGHT: vertical waveform — all (gray) + average (bold)
-        nexttile(tl);
-        hold on; box on; grid on;
+        % RIGHT: vertical waveform — all (gray) + average (black)
+        ax2 = nexttile(tl); 
+        hold(ax2, 'on'); grid(ax2,'on'); box(ax2,'on');
+        set(ax2,'YDir','reverse', 'YLim',[0.5 nCh+0.5], 'TickDir','out', ...
+            'FontSize',9, 'YTick',1:nCh, 'YTickLabel',[], ...       % <-- hide labels to keep equal widths
+            'Layer','top', 'TickLength',[0 0]);
+        % contributors
         y = 1:nCh;
-        set(gca,'YDir','reverse'); % 1 at top
-        % all contributors (thin gray)
         for i = 1:nEvt
-            plot(S(:,i), y, '-', 'Color', [0.6 0.6 0.6 0.7], 'LineWidth', 0.8);
+            plot(ax2, S(:,i), y, '-', 'Color', [0.6 0.6 0.6 0.8], 'LineWidth', 0.9);
         end
-        % average (bold)
-        plot(MU, y, '-', 'Color', [0 0 0], 'LineWidth', 2.0);
-        % zero line (source/sink center)
-        xline(0, '--k', 'LineWidth', 0.8);
-        xlim([-clim, +clim]);
-        ylim([1, nCh]);
-        xlabel('CSD (− sink   |   + source)');
-        yticks(1:nCh); yticklabels(L); set(gca,'FontSize',9);
-        title(sprintf('%s — Vertical waveform @ 0 ms (mean in black)', tag), 'FontSize', 10, 'FontWeight','bold');
+        % average
+        plot(ax2, MU, y, '-', 'Color', [0 0 0], 'LineWidth', 2.0);
+        xline(ax2, 0, '--k', 'LineWidth', 0.8);
+        xlim(ax2, [-clim, +clim]);
+        xlabel(ax2, 'CSD (− sink   |   + source)');
 
-        % Super-title with window/anchor info (smaller to avoid crop)
+        % Enforce identical inner boxes & no extra padding
+        set([ax1 ax2], 'LooseInset', max(get(ax1,'TightInset'), get(ax2,'TightInset')));
+        linkaxes([ax1 ax2], 'y');   % hard link on Y
+
+        % Shared colorbar that DOES NOT resize a single tile
+        cb = colorbar(tl, 'eastoutside');
+        cb.Label.String = sprintf('CSD units (CLim = \\pm%.2f)', clim);
+
+        % Titles (small font to avoid crop); one group-level sgtitle
+        title(ax1, sprintf('%s — CSD slices at 0 ms (n=%d)', tag, nEvt), 'FontSize',10, 'FontWeight','bold');
+        title(ax2, sprintf('%s — Vertical waveform @ 0 ms (mean in black)', tag), 'FontSize',10, 'FontWeight','bold');
         sg = sprintf('%s  |  align: first-channel max (\\pm%.1f ms)  |  window: \\pm%.1f ms  |  channels=%d', ...
             tag, 1e3*HWanchor/sfx, 1e3*HWwin/sfx, nCh);
-        sgtitle(tl, sg, 'FontSize', 10, 'FontWeight', 'bold');
+        sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
 
+        % Export
         exportgraphics(f, outPath, 'Resolution', 220);
         close(f);
         fprintf('Saved %s: %s\n', tag, outPath);
@@ -297,7 +289,7 @@ function evts = parseEvtNumsFromPngs(dirpath)
 end
 
 function C = computeCSD(Ych_t)
-% Ych_t: (channels x time) voltage (µV). Returns (channels x time) CSD.
+% Ych_t: (channels x time) voltage (µV) → (channels x time) CSD.
 % Interior: standard 3-point stencil; edges replicated from nearest interior.
     [nCh, nT] = size(Ych_t);
     if nCh < 2
