@@ -198,8 +198,9 @@ function pvec = scanPercentiles(evtList)
         rowXL = e;
         if rowXL < 1 || rowXL > NrowsXL, continue; end
 
-        s0_ev = round(onSamp[rowXL]);
-        s1_ev = round(offSamp[rowXL]);
+        % *** FIX: MATLAB indexing uses parentheses, not square brackets ***
+        s0_ev = round(onSamp(rowXL));
+        s1_ev = round(offSamp(rowXL));
         if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
 
         % ---- Anchor ----
