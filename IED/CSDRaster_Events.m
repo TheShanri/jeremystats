@@ -124,9 +124,10 @@ HWwin    = max(1, round(winHalfMs   * sfx)); % ± display window (±20 ms)
 HWanchor = max(1, round(anchorHWms  * sfx)); % ± anchor search (5 ms)
 tRelMs   = (-HWwin:HWwin) / sfx * 1e3;
 winN     = numel(tRelMs);
+msWin    = 1e3*HWwin/sfx;                    % half-window in ms
 
 fprintf('CSDRaster_Events: sfx=%.1f Hz | raster window ±%.1f ms | anchor=%s (±%.1f ms)\n', ...
-    sfx, 1e3*HWwin/sfx, anchorMode, 1e3*HWanchor/sfx);
+    sfx, msWin, anchorMode, 1e3*HWanchor/sfx);
 
 % ---------------- Read Excel -> samples per row ----------------
 T = readtable(excelPath, 'ReadVariableNames', true);
@@ -197,8 +198,8 @@ function pvec = scanPercentiles(evtList)
         rowXL = e;
         if rowXL < 1 || rowXL > NrowsXL, continue; end
 
-        s0_ev = round(onSamp(rowXL));
-        s1_ev = round(offSamp(rowXL));
+        s0_ev = round(onSamp[rowXL]);
+        s1_ev = round(offSamp[rowXL]);
         if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
 
         % ---- Anchor ----
@@ -304,31 +305,31 @@ function renderGroup(evtList, outDir, tag, clim)
         % ---- Compute CSD on (time x channels) ----
         [csd, newtrange, newchrange] = CSDPP2(Y', 'n', sfx); %#ok<ASGLU>
 
-        % ---- Plot raster (GLOBAL CLim, 1 at TOP) ----
-        perRowPx = 10; basePx = 200; maxPx = 2400;
+        % ---- Plot raster (GLOBAL CLim, channel 1 at TOP, centered time) ----
+        perRowPx = 10; basePx = 220; maxPx = 2600;
         figH = min(maxPx, basePx + perRowPx * nCh);
         f = figure('Color','w','Position',[80 80 1000 figH],'Visible','off');
 
-        % newtrange is µs (classic). Convert to ms for axes.
-        time_ms = newtrange * 1e-3;
+        % Center time at 0: use exact ±msWin over the resampled time length
+        time_ms = linspace(-msWin, +msWin, size(csd,1));
+
         imagesc(time_ms, 1:numel(newchrange), csd'); % channels as rows
-        set(gca, 'YDir', 'reverse');  % 1 at TOP, larger at bottom
+        set(gca, 'YDir', 'reverse');                 % 1 at TOP
         caxis([-clim, +clim]);
         colormap(jet); colorbar;
 
+        % Label EVERY channel (mapped back to original chList where possible)
+        baseIdx = max(1, min(numel(chList), round(newchrange)));
+        yLabels = arrayfun(@(ii_) sprintf('%d', chList(baseIdx(ii_))), 1:numel(newchrange), 'UniformOutput', false);
+        set(gca, 'YTick', 1:numel(newchrange), 'YTickLabel', yLabels, 'FontSize', 8);
+
+        % Tighten X to exactly [-msWin, +msWin]
+        xlim([-msWin, +msWin]);
         xlabel('Time (ms)');
+        ylabel('Channel');
 
-        % Tick labels: keep it light to avoid clutter
-        nY = numel(newchrange);
-        nTicks = min(12, nY);
-        yTicks = round(linspace(1, nY, nTicks));
-        set(gca,'YTick',yTicks,'FontSize',9);
-        % Optional: annotate with "row k"
-        yTickLabels = arrayfun(@(k) sprintf('row %d', k), yTicks, 'UniformOutput', false);
-        set(gca,'YTickLabel', yTickLabels);
-
-        ttl = sprintf('%s  |  Evt %d  |  CSD (second spatial derivative)  |  anchor=%s  |  window=\\pm%.1f ms  |  ch=%d  |  CLim=\\pm%.1f', ...
-            tag, e, char(anchorMode), 1e3*HWwin/sfx, nCh, clim);
+        ttl = sprintf('%s  |  Evt %d  |  CSD (second spatial derivative)  |  anchor=%s  |  window=\\pm%.1f ms  |  ch=%d→%d  |  CLim=\\pm%.1f', ...
+            tag, e, char(anchorMode), msWin, nCh, numel(newchrange), clim);
         title(ttl, 'FontSize', 12, 'FontWeight', 'bold');
 
         % ---- Save ----
@@ -344,7 +345,7 @@ function evts = parseEvtNumsFromPngs(dirpath)
     evts = [];
     for k = 1:numel(L)
         m = regexp(L(k).name, 'Evt(\d+)', 'tokens', 'once');
-        if ~isempty(m)   % <<< FIXED: MATLAB uses isempty, not isEmpty
+        if ~isempty(m)
             ev = str2double(m{1});
             if isfinite(ev), evts(end+1) = ev; end %#ok<AGROW>
         end
