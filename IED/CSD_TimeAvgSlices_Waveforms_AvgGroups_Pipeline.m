@@ -11,7 +11,7 @@ function res = CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline(inputFolder, dataM
 %
 % OUTPUT FILES:
 %   <inputFolder>/CSD Center Slices Output/CSD_TimeAvg_SOLID.png
-%   <inputFolder>/CSD Center Slices Output/CSD_TimeAvg_SPUTTER.png
+%   <inputFolder>/CSD Center Slces Output/CSD_TimeAvg_SPUTTER.png
 %   <inputFolder>/CSD Center Slices Output/CSD_TimeAvg_stats.csv
 
 % ---------- Args ----------
