@@ -20,14 +20,16 @@
 
 Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
 
-Conversion to double from struct is not possible.
 
-Error in EventStacks_ampWidth_Avg_Pipeline (line 193)
-    out.groups(end+1) = packGroup('SOLID', SOL, pngSOL); %#ok<AGROW>
+Error using tabular/vertcat
+An error occurred when concatenating the table variable 'AmpMean_uV' using vertcat.
 
-Error in Pipeline_Main (line 42)
-evstacksOut = EventStacks_ampWidth_Avg_Pipeline( ...
+Error in Pipeline_Main (line 109)
+        allStats = [allStats; row]; %#ok<AGROW>
 
 Error in main (line 21)
 Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
- 
+
+Caused by:
+    Error using vertcat
+    Dimensions of arrays being concatenated are not consistent.
