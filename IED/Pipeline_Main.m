@@ -1,23 +1,21 @@
 function Pipeline_Main(inputFolder, dataMatPath, varargin)
 % Pipeline_Main
-% Orchestrates the analysis and figure creation across multiple sub-pipelines.
-%
-% Creates TWO master plots at full/native PNG resolution:
+% Orchestrates sub-pipelines and builds TWO master, hi-res montages:
 %   Pipeline Output/Master_Montage_SOLID.png
 %   Pipeline Output/Master_Montage_SPUTTER.png
-%
-% (For now only EventStacks_ampWidth_Avg_Pipeline is active; others are placeholders.)
+% Also merges available stats CSVs into:
+%   Pipeline Output/Master_Stats.csv
 
 opts = struct(varargin{:});
 
-% ---------- Output hub for the master ----------
+% ---------- Output hub ----------
 masterOutDir = fullfile(inputFolder, 'Pipeline Output');
 if ~exist(masterOutDir, 'dir'), mkdir(masterOutDir); end
 masterPngSOLID   = fullfile(masterOutDir, 'Master_Montage_SOLID.png');
 masterPngSPUTTER = fullfile(masterOutDir, 'Master_Montage_SPUTTER.png');
 masterCSV        = fullfile(masterOutDir, 'Master_Stats.csv');
 
-% ---------- 1) EventStacks_ampWidth_Avg_Pipeline (ACTIVE) ----------
+% ---------- 1) EventStacks_ampWidth_Avg_Pipeline ----------
 evtStacksRes = [];
 try
     evtStacksRes = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -25,14 +23,16 @@ catch ME
     warning('EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 2) VoltageRaster_EventsAvg_Pipeline ----------
-% try
-%     voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
-% catch ME
-%     warning('VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
-% end
+% ---------- 2) VoltageRaster_EventsAvg_Pipeline (NEW) ----------
+voltRasterRes = [];
+try
+    voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
+catch ME
+    warning('VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
+end
 
 % ---------- 3) CSDRaster_Avg_Pipeline ----------
+% csdRasterRes = [];
 % try
 %     csdRasterRes = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
 % catch ME
@@ -40,6 +40,7 @@ end
 % end
 
 % ---------- 4) CSD_CenterSlices_Waveform_AvgGroups_Pipeline ----------
+% csdSlicesRes = [];
 % try
 %     csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
 % catch ME
@@ -47,51 +48,46 @@ end
 % end
 
 % ---------- 5) CSD_TimeAvg_Waveform_AvgGroups_Pipeline ----------
+% csdTimeAvgRes = [];
 % try
 %     csdTimeAvgRes = CSD_TimeAvg_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
 % catch ME
 %     warning('CSD_TimeAvg_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
 % end
 
-% ---------- Gather whatever PNGs exist (keep paths; maintain native res) ----------
+% ---------- Collect PNGs ----------
 pngSOL = {};
 pngSPU = {};
 
-% EventStacks outputs
+% EventStacks
 if ~isempty(evtStacksRes)
-    if isfield(evtStacksRes, 'pngSolid') && isfile(evtStacksRes.pngSolid)
-        pngSOL{end+1} = evtStacksRes.pngSolid;
-    end
-    if isfield(evtStacksRes, 'pngSputter') && isfile(evtStacksRes.pngSputter)
-        pngSPU{end+1} = evtStacksRes.pngSputter;
-    end
+    if isfield(evtStacksRes, 'pngSolid')   && isfile(evtStacksRes.pngSolid),   pngSOL{end+1} = evtStacksRes.pngSolid; end
+    if isfield(evtStacksRes, 'pngSputter') && isfile(evtStacksRes.pngSputter), pngSPU{end+1} = evtStacksRes.pngSputter; end
 end
 
-% % Voltage raster (placeholder)
-% if exist('voltRasterRes','var') && ~isempty(voltRasterRes)
-%     if isfield(voltRasterRes, 'pngSolid') && isfile(voltRasterRes.pngSolid),   pngSOL{end+1} = voltRasterRes.pngSolid;   end
-%     if isfield(voltRasterRes, 'pngSputter') && isfile(voltRasterRes.pngSputter), pngSPU{end+1} = voltRasterRes.pngSputter; end
-% end
+% Voltage Raster (NEW)
+if ~isempty(voltRasterRes)
+    if isfield(voltRasterRes, 'pngSolid')   && isfile(voltRasterRes.pngSolid),   pngSOL{end+1} = voltRasterRes.pngSolid; end
+    if isfield(voltRasterRes, 'pngSputter') && isfile(voltRasterRes.pngSputter), pngSPU{end+1} = voltRasterRes.pngSputter; end
+end
 
-% % CSD raster (placeholder)
-% if exist('csdRasterRes','var') && ~isempty(csdRasterRes)
-%     if isfield(csdRasterRes, 'pngSolid') && isfile(csdRasterRes.pngSolid),   pngSOL{end+1} = csdRasterRes.pngSolid;   end
+% % CSD raster
+% if ~isempty(csdRasterRes)
+%     if isfield(csdRasterRes, 'pngSolid')   && isfile(csdRasterRes.pngSolid),   pngSOL{end+1} = csdRasterRes.pngSolid; end
 %     if isfield(csdRasterRes, 'pngSputter') && isfile(csdRasterRes.pngSputter), pngSPU{end+1} = csdRasterRes.pngSputter; end
 % end
-
-% % CSD center slices (placeholder)
-% if exist('csdSlicesRes','var') && ~isempty(csdSlicesRes)
-%     if isfield(csdSlicesRes, 'pngSolid') && isfile(csdSlicesRes.pngSolid),   pngSOL{end+1} = csdSlicesRes.pngSolid;   end
+% % CSD center slices
+% if ~isempty(csdSlicesRes)
+%     if isfield(csdSlicesRes, 'pngSolid')   && isfile(csdSlicesRes.pngSolid),   pngSOL{end+1} = csdSlicesRes.pngSolid; end
 %     if isfield(csdSlicesRes, 'pngSputter') && isfile(csdSlicesRes.pngSputter), pngSPU{end+1} = csdSlicesRes.pngSputter; end
 % end
-
-% % CSD time-avg (placeholder)
-% if exist('csdTimeAvgRes','var') && ~isempty(csdTimeAvgRes)
-%     if isfield(csdTimeAvgRes, 'pngSolid') && isfile(csdTimeAvgRes.pngSolid),   pngSOL{end+1} = csdTimeAvgRes.pngSolid;   end
+% % CSD time-avg
+% if ~isempty(csdTimeAvgRes)
+%     if isfield(csdTimeAvgRes, 'pngSolid')   && isfile(csdTimeAvgRes.pngSolid),   pngSOL{end+1} = csdTimeAvgRes.pngSolid; end
 %     if isfield(csdTimeAvgRes, 'pngSputter') && isfile(csdTimeAvgRes.pngSputter), pngSPU{end+1} = csdTimeAvgRes.pngSputter; end
 % end
 
-% ---------- Build TWO hi-res montages (no resampling) ----------
+% ---------- Build two hi-res montages ----------
 if isempty(pngSOL)
     warning('No SOLID PNGs found; SOLID montage not created.');
 else
@@ -114,19 +110,17 @@ else
     end
 end
 
-% ---------- Merge whatever stats exist into CSV ----------
-T = table(); % start empty
-
+% ---------- Merge available stats into a single CSV ----------
+T = table();
+% EventStacks CSV (if present)
 if ~isempty(evtStacksRes) && isfield(evtStacksRes, 'statsCSV') && isfile(evtStacksRes.statsCSV)
-    try
-        T1 = readtable(evtStacksRes.statsCSV);
-        T = vertcatSafe(T, T1);
-    catch ME
-        warning('Failed reading EventStacks stats CSV: %s', ME.message);
-    end
+    try, T = vertcatSafe(T, readtable(evtStacksRes.statsCSV)); catch, end
 end
-
-% (Append more CSVs here as new pipeline steps come online...)
+% Voltage Raster CSV (NEW)
+if ~isempty(voltRasterRes) && isfield(voltRasterRes, 'statsCSV') && isfile(voltRasterRes.statsCSV)
+    try, T = vertcatSafe(T, readtable(voltRasterRes.statsCSV)); catch, end
+end
+% (Append other CSVs here as you bring them online)
 
 try
     if isempty(T)
@@ -139,6 +133,7 @@ catch ME
 end
 
 end
+
 
 % ----------------- helpers -----------------
 
@@ -165,7 +160,7 @@ end
 
 function makeMontageHiRes(pngList, outPath)
 % Stack images vertically at NATIVE resolution (no resampling).
-% Pads narrower images to the max width with white. Adds 6 px white spacer between rows.
+% Pads narrower images to the max width with white. Adds 6 px white spacer.
 
 assert(~isempty(pngList), 'pngList is empty.');
 
@@ -183,7 +178,7 @@ end
 Wmax = max(widths);
 sep  = 6; % white separator in pixels
 
-% Determine output class and white value
+% Output class and white value
 cls = class(imgs{1});
 switch cls
     case {'uint8'},  whiteVal = uint8(255);
@@ -193,7 +188,6 @@ switch cls
     otherwise, error('Unsupported image class: %s', cls);
 end
 
-% Build stacked image
 totalH = sum(heights) + sep*(numel(imgs)-1);
 if size(imgs{1},3) == 1
     out = repmat(whiteVal, [totalH, Wmax, 1]);
@@ -205,12 +199,10 @@ y = 1;
 for i = 1:numel(imgs)
     I = imgs{i};
     [h,w,c] = size(I);
-    out(y:y+h-1, 1:w, 1:c) = I; % left-align; pad on right with white
+    out(y:y+h-1, 1:w, 1:c) = I;
     y = y + h;
-    if i < numel(imgs)
-        y = y + sep;
-    end
+    if i < numel(imgs), y = y + sep; end
 end
 
-imwrite(out, outPath); % no resampling, preserves pixel fidelity
+imwrite(out, outPath);
 end
