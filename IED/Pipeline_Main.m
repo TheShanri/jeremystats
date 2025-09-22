@@ -1,120 +1,163 @@
-function Pipeline_Main(inputFolder, dataMatPath)
-
-% --- RUN MODULES (example: EventStacks) ---
-evstacksOut = EventStacks_ampWidth_Avg_Pipeline( ...
-    inputFolder, dataMatPath, ...
-    'makeIndividualPNGs', false, ...   % let the master plot own rendering
-    'returnTraces',       false );     % keep result light for now
-
-% TODO: run the other modules here and collect their outputs:
-% vrasOut  = VoltageRaster_EventsAvg_Pipeline(...);
-% csdAvg   = CSDRaster_Avg_Pipeline(...);
-% csd0     = CSD_CentersSlieces_Waveform_AvgGroups_Pipeline(...);
-% csdTavg  = CSD_TimeAvg_Waveform_AvgGroups_Pipeline(...);
-
-% -----------------------------------------------------------
-% TABLES: group-level (scalars) + channel-level (per channel)
-% -----------------------------------------------------------
-
-% Group-level: one row per group with scalar stats
-allStats = table('Size',[0 8], ...
-    'VariableTypes', {'string','string','double','double','double','double','double','double'}, ...
-    'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
-
-% Channel-level: one row per channel per group
-allStatsByChannel = table('Size',[0 9], ...
-    'VariableTypes', {'string','string','double','double','double','double','double','double','double'}, ...
-    'VariableNames', {'Module','Group','ChannelIndex','CSC','NUsed','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
-
-% ---- collect stats from EventStacks (EXAMPLE) ----
-[grpTbl, chTbl] = statsFrom_EventStacks(evstacksOut);
-allStats         = [allStats; grpTbl];
-allStatsByChannel= [allStatsByChannel; chTbl];
-
-% TODO: append from other modules the same way:
-% [grpTbl, chTbl] = statsFrom_VoltageRaster(vrasOut);            allStats = [allStats; grpTbl]; allStatsByChannel = [allStatsByChannel; chTbl];
-% [grpTbl, chTbl] = statsFrom_CSDRasterAvg(csdAvg);              allStats = [allStats; grpTbl]; allStatsByChannel = [allStatsByChannel; chTbl];
-% [grpTbl, chTbl] = statsFrom_CSD_CenterSlices(csd0);            allStats = [allStats; grpTbl]; allStatsByChannel = [allStatsByChannel; chTbl];
-% [grpTbl, chTbl] = statsFrom_CSD_TimeAveraged(csdTavg);         allStats = [allStats; grpTbl]; allStatsByChannel = [allStatsByChannel; chTbl];
-
-% --------- MASTER PLOT (placeholder) ----------
-% masterFig = figure('Color','w','Position',[50 50 1400 900]);
-% % Your tiledlayout + subplots go here, each subfunction returns data/images
-% % you render into this single master figure.
-% exportgraphics(masterFig, fullfile(inputFolder,'Master_Plot.png'), 'Resolution', 220);
-
-% --------- SAVE STATS ----------
-writetable(allStats,         fullfile(inputFolder,'Pipeline_GroupStats.csv'));
-writetable(allStatsByChannel,fullfile(inputFolder,'Pipeline_ChannelStats.csv'));
-fprintf('Saved:\n  %s\n  %s\n', ...
-    fullfile(inputFolder,'Pipeline_GroupStats.csv'), ...
-    fullfile(inputFolder,'Pipeline_ChannelStats.csv'));
-
-end
-
-% ==========================================================
-% Helpers to normalize/flatten module outputs into tables
-% ==========================================================
-
 function [grpTbl, chTbl] = statsFrom_EventStacks(out)
-% out: struct returned by EventStacks_ampWidth_Avg_Pipeline
-% out.groups(g) fields used:
-%   .tag (string), .nEventsUsed (scalar), .ampMean (nChx1), .ampSD (nChx1),
-%   .hwMean (nChx1), .hwSD (nChx1), .n (nChx1), .MU (nCh x T)
-% out.channelList (1 x nCh), out.kept_channels (optional)
+% Normalizes EventStacks_ampWidth_Avg_Pipeline outputs into:
+%   grpTbl         : one row per group (SCALARS ONLY)
+%   chTbl          : one row per channel per group
 
 moduleName = "EventStacks_ampWidth_Avg";
-nCh = numel(out.channelList);
-if isfield(out,'kept_channels') && ~isempty(out.kept_channels)
-    csc = out.kept_channels(:);
-    if numel(csc) < max(out.channelList)
-        csc(end+1:max(out.channelList)) = NaN; %#ok<AGROW>
-    end
-else
-    csc = nan(max(out.channelList),1);
-end
 
-% Preallocate empty tables
-grpTbl = table('Size',[0 8], ...
-    'VariableTypes', {'string','string','double','double','double','double','double','double'}, ...
+% ---- fixed-type empty tables (so vertcat has consistent types) ----
+grpTbl = table( ...
+    strings(0,1), ... % Module
+    strings(0,1), ... % Group
+    zeros(0,1), ...   % NEvents
+    zeros(0,1), ...   % NChannels
+    zeros(0,1), ...   % AmpMean_uV
+    zeros(0,1), ...   % AmpSD_uV
+    zeros(0,1), ...   % HW_Mean_ms
+    zeros(0,1), ...   % HW_SD_ms
     'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
 
-chTbl  = table('Size',[0 9], ...
-    'VariableTypes', {'string','string','double','double','double','double','double','double','double'}, ...
+chTbl = table( ...
+    strings(0,1), ... % Module
+    strings(0,1), ... % Group
+    zeros(0,1), ...   % ChannelIndex
+    zeros(0,1), ...   % CSC
+    zeros(0,1), ...   % NUsed
+    zeros(0,1), ...   % AmpMean_uV
+    zeros(0,1), ...   % AmpSD_uV
+    zeros(0,1), ...   % HW_Mean_ms
+    zeros(0,1), ...   % HW_SD_ms
     'VariableNames', {'Module','Group','ChannelIndex','CSC','NUsed','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
 
+% Channel list & CSC list (CSC may be missing)
+nCh = numel(out.channelList);
+if isfield(out,'kept_channels') && ~isempty(out.kept_channels)
+    cscVec = out.kept_channels(:);
+    if numel(cscVec) < max(out.channelList)
+        cscVec(end+1:max(out.channelList)) = NaN; %#ok<AGROW>
+    end
+else
+    cscVec = nan(max(out.channelList),1);
+end
+
+% ---- iterate groups ----
 for g = 1:numel(out.groups)
     G = out.groups(g);
     groupTag = string(G.tag);
 
-    % ---- group-level scalars (collapse vectors) ----
-    ampMean_scalar = mean(G.ampMean, 'omitnan');
-    ampSD_scalar   = mean(G.ampSD,   'omitnan');   % average SD across channels (or replace with pooled, if you prefer)
-    hwMean_scalar  = mean(G.hwMean,  'omitnan');
-    hwSD_scalar    = mean(G.hwSD,    'omitnan');
+    % ---------- SCALARIFY group-level metrics ----------
+    nEvents = scalarify(getfieldsafe(G,'nEventsUsed'), 0); %#ok<GFLD>
+    if nEvents<=0
+        % Still emit a row of NaNs so downstream stays consistent
+        rowG = table( ...
+            moduleName, groupTag, ...
+            double(nEvents), double(nCh), ...
+            NaN, NaN, NaN, NaN, ...
+            'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
+        grpTbl = [grpTbl; rowG];
+        % And skip channel rows for this group
+        continue;
+    end
 
-    rowG = table(moduleName, groupTag, ...
-                 double(G.nEventsUsed), double(nCh), ...
-                 double(ampMean_scalar), double(ampSD_scalar), ...
-                 double(hwMean_scalar),  double(hwSD_scalar), ...
-                 'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
+    ampMean_scalar = scalarMean(getfieldsafe(G,'ampMean'));   % vector -> scalar
+    ampSD_scalar   = scalarMean(getfieldsafe(G,'ampSD'));
+    hwMean_scalar  = scalarMean(getfieldsafe(G,'hwMean'));
+    hwSD_scalar    = scalarMean(getfieldsafe(G,'hwSD'));
+
+    rowG = table( ...
+        moduleName, groupTag, ...
+        double(nEvents), double(nCh), ...
+        double(ampMean_scalar), double(ampSD_scalar), ...
+        double(hwMean_scalar),  double(hwSD_scalar), ...
+        'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
+
     grpTbl = [grpTbl; rowG];
 
-    % ---- per-channel tall rows ----
+    % ---------- Channel-level tall rows ----------
+    % fallbacks to NaN with correct shapes if fields are missing
+    nUsed  = asVec(getfieldsafe(G,'n'),      nCh);
+    aMean  = asVec(getfieldsafe(G,'ampMean'),nCh);
+    aSD    = asVec(getfieldsafe(G,'ampSD'),  nCh);
+    hMean  = asVec(getfieldsafe(G,'hwMean'), nCh);
+    hSD    = asVec(getfieldsafe(G,'hwSD'),   nCh);
+
     for k = 1:nCh
         ch = out.channelList(k);
-        rowC = table(moduleName, groupTag, ...
-                     double(ch), double(getVal(csc, ch)), ...
-                     double(G.n(k)), ...
-                     double(G.ampMean(k)), double(G.ampSD(k)), ...
-                     double(G.hwMean(k)),  double(G.hwSD(k)), ...
-                     'VariableNames', {'Module','Group','ChannelIndex','CSC','NUsed','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
+        csc = getIdx(cscVec, ch);
+
+        rowC = table( ...
+            moduleName, groupTag, ...
+            double(ch), double(csc), ...
+            double(nUsed(k)), ...
+            double(aMean(k)), double(aSD(k)), ...
+            double(hMean(k)), double(hSD(k)), ...
+            'VariableNames', {'Module','Group','ChannelIndex','CSC','NUsed','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
+
         chTbl = [chTbl; rowC];
     end
 end
 end
 
-function v = getVal(vec, idx)
+% =================== tiny helpers ===================
+
+function x = getfieldsafe(S, fname, defaultVal)
+if nargin<3, defaultVal = []; end
+if isstruct(S) && isfield(S,fname)
+    x = S.(fname);
+else
+    x = defaultVal;
+end
+end
+
+function s = scalarify(x, nanIfEmpty)
+if nargin<2, nanIfEmpty = NaN; end
+% turn anything into a scalar double
+if isempty(x)
+    s = nanIfEmpty; return;
+end
+if isstruct(x) || istable(x) || iscell(x)
+    s = nanIfEmpty; return;
+end
+x = double(x);
+if ~isvector(x)
+    s = mean(x(:), 'omitnan');  % squeeze matrices to scalar
+else
+    if numel(x)==1
+        s = x;
+    else
+        s = mean(x, 'omitnan'); % vector -> scalar mean
+    end
+end
+if isempty(s), s = nanIfEmpty; end
+end
+
+function m = scalarMean(v)
+% vector/array -> scalar mean (NaN-safe); empty -> NaN
+if isempty(v)
+    m = NaN;
+else
+    m = mean(double(v(:)), 'omitnan');
+end
+end
+
+function v = asVec(x, nCh)
+% ensure a length-nCh column vector of doubles (NaN-filled if needed)
+x = double(x);
+if isempty(x)
+    v = nan(nCh,1);
+else
+    x = x(:);
+    if numel(x) < nCh
+        v = nan(nCh,1);
+        v(1:numel(x)) = x;
+    else
+        v = x(1:nCh);
+    end
+end
+end
+
+function v = getIdx(vec, idx)
+% safe indexing returning NaN if out-of-range
 if idx>=1 && idx<=numel(vec) && ~isempty(vec(idx))
     v = vec(idx);
 else
