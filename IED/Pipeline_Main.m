@@ -1,166 +1,216 @@
-function [grpTbl, chTbl] = statsFrom_EventStacks(out)
-% Normalizes EventStacks_ampWidth_Avg_Pipeline outputs into:
-%   grpTbl         : one row per group (SCALARS ONLY)
-%   chTbl          : one row per channel per group
+function Pipeline_Main(inputFolder, dataMatPath, varargin)
+% Pipeline_Main
+% Orchestrates the analysis and figure creation across multiple sub-pipelines.
+%
+% INPUTS
+%   inputFolder  : path with Solid/ and Sputter/ subfolders + the Excel sheet
+%   dataMatPath  : .mat with fields: d [nRows x nSamp], sfx, (optional) kept_channels
+%
+% NAME-VALUE (forwarded to sub-pipelines where relevant)
+%   'excelPath'            : explicit Excel sheet path (auto-detect if omitted)
+%   'channelIndices'       : rows to include (default: all)
+%   'scaleToMicroV'        : scale factor(s), default 1
+%   'halfWidthMs'          : etc... (each sub-pipeline handles its own options)
+%
+% OUTPUTS & SIDE-EFFECTS
+%   - Each sub-pipeline saves its PNGs and MAT stats in its own folder.
+%   - This function composes a "master" montage from whatever PNGs exist.
+%   - This function writes a CSV that merges *available* stats.
+%
+% NOTE
+%   For now, only EventStacks_ampWidth_Avg_Pipeline is active.
+%   Other calls are left as commented placeholders (so this skeleton
+%   runs even before those components exist).
 
-moduleName = "EventStacks_ampWidth_Avg";
+opts = struct(varargin{:});
 
-% ---- fixed-type empty tables (so vertcat has consistent types) ----
-grpTbl = table( ...
-    strings(0,1), ... % Module
-    strings(0,1), ... % Group
-    zeros(0,1), ...   % NEvents
-    zeros(0,1), ...   % NChannels
-    zeros(0,1), ...   % AmpMean_uV
-    zeros(0,1), ...   % AmpSD_uV
-    zeros(0,1), ...   % HW_Mean_ms
-    zeros(0,1), ...   % HW_SD_ms
-    'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
+% ---------- Output hub for the master ----------
+masterOutDir = fullfile(inputFolder, 'Pipeline Output');
+if ~exist(masterOutDir, 'dir'), mkdir(masterOutDir); end
+masterPng    = fullfile(masterOutDir, 'Master_Montage.png');
+masterCSV    = fullfile(masterOutDir, 'Master_Stats.csv');
 
-chTbl = table( ...
-    strings(0,1), ... % Module
-    strings(0,1), ... % Group
-    zeros(0,1), ...   % ChannelIndex
-    zeros(0,1), ...   % CSC
-    zeros(0,1), ...   % NUsed
-    zeros(0,1), ...   % AmpMean_uV
-    zeros(0,1), ...   % AmpSD_uV
-    zeros(0,1), ...   % HW_Mean_ms
-    zeros(0,1), ...   % HW_SD_ms
-    'VariableNames', {'Module','Group','ChannelIndex','CSC','NUsed','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
-
-% Channel list & CSC list (CSC may be missing)
-nCh = numel(out.channelList);
-if isfield(out,'kept_channels') && ~isempty(out.kept_channels)
-    cscVec = out.kept_channels(:);
-    if numel(cscVec) < max(out.channelList)
-        cscVec(end+1:max(out.channelList)) = NaN; %#ok<AGROW>
-    end
-else
-    cscVec = nan(max(out.channelList),1);
+% ---------- 1) EventStacks_ampWidth_Avg_Pipeline (ACTIVE) ----------
+evtStacksRes = [];
+try
+    evtStacksRes = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
+catch ME
+    warning('EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
 end
 
-% ---- iterate groups ----
-for g = 1:numel(out.groups)
-    G = out.groups(g);
-    groupTag = string(G.tag);
+% ---------- 2) VoltageRaster_EventsAvg_Pipeline ----------
+% Place-holder (to be implemented)
+% try
+%     voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
+% catch ME
+%     warning('VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
+% end
 
-    % ---------- SCALARIFY group-level metrics ----------
-    nEvents = scalarify(getfieldsafe(G,'nEventsUsed'), 0); %#ok<GFLD>
-    if nEvents<=0
-        % Still emit a row of NaNs so downstream stays consistent
-        rowG = table( ...
-            moduleName, groupTag, ...
-            double(nEvents), double(nCh), ...
-            NaN, NaN, NaN, NaN, ...
-            'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
-        grpTbl = [grpTbl; rowG];
-        % And skip channel rows for this group
-        continue;
+% ---------- 3) CSDRaster_Avg_Pipeline ----------
+% Place-holder (to be implemented)
+% try
+%     csdRasterRes = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
+% catch ME
+%     warning('CSDRaster_Avg_Pipeline failed: %s', ME.message);
+% end
+
+% ---------- 4) CSD_CenterSlices_Waveform_AvgGroups_Pipeline ----------
+% Place-holder (to be implemented)
+% try
+%     csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
+% catch ME
+%     warning('CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
+% end
+
+% ---------- 5) CSD_TimeAvg_Waveform_AvgGroups_Pipeline ----------
+% Place-holder (to be implemented)
+% try
+%     csdTimeAvgRes = CSD_TimeAvg_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
+% catch ME
+%     warning('CSD_TimeAvg_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
+% end
+
+% ---------- Gather whatever PNGs exist and build a master montage ----------
+pngList = {};
+lblList = {};
+
+% EventStacks outputs (if present)
+if ~isempty(evtStacksRes)
+    if isfield(evtStacksRes, 'pngSolid') && isfile(evtStacksRes.pngSolid)
+        pngList{end+1} = evtStacksRes.pngSolid; lblList{end+1} = 'EventStacks SOLID'; %#ok<*AGROW>
     end
-
-    ampMean_scalar = scalarMean(getfieldsafe(G,'ampMean'));   % vector -> scalar
-    ampSD_scalar   = scalarMean(getfieldsafe(G,'ampSD'));
-    hwMean_scalar  = scalarMean(getfieldsafe(G,'hwMean'));
-    hwSD_scalar    = scalarMean(getfieldsafe(G,'hwSD'));
-
-    rowG = table( ...
-        moduleName, groupTag, ...
-        double(nEvents), double(nCh), ...
-        double(ampMean_scalar), double(ampSD_scalar), ...
-        double(hwMean_scalar),  double(hwSD_scalar), ...
-        'VariableNames', {'Module','Group','NEvents','NChannels','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
-
-    grpTbl = [grpTbl; rowG];
-
-    % ---------- Channel-level tall rows ----------
-    % fallbacks to NaN with correct shapes if fields are missing
-    nUsed  = asVec(getfieldsafe(G,'n'),      nCh);
-    aMean  = asVec(getfieldsafe(G,'ampMean'),nCh);
-    aSD    = asVec(getfieldsafe(G,'ampSD'),  nCh);
-    hMean  = asVec(getfieldsafe(G,'hwMean'), nCh);
-    hSD    = asVec(getfieldsafe(G,'hwSD'),   nCh);
-
-    for k = 1:nCh
-        ch = out.channelList(k);
-        csc = getIdx(cscVec, ch);
-
-        rowC = table( ...
-            moduleName, groupTag, ...
-            double(ch), double(csc), ...
-            double(nUsed(k)), ...
-            double(aMean(k)), double(aSD(k)), ...
-            double(hMean(k)), double(hSD(k)), ...
-            'VariableNames', {'Module','Group','ChannelIndex','CSC','NUsed','AmpMean_uV','AmpSD_uV','HW_Mean_ms','HW_SD_ms'});
-
-        chTbl = [chTbl; rowC];
+    if isfield(evtStacksRes, 'pngSputter') && isfile(evtStacksRes.pngSputter)
+        pngList{end+1} = evtStacksRes.pngSputter; lblList{end+1} = 'EventStacks SPUTTER';
     end
 end
-end
 
-% =================== tiny helpers ===================
+% % Voltage raster (avg) (placeholder)
+% if exist('voltRasterRes','var') && ~isempty(voltRasterRes)
+%     if isfield(voltRasterRes, 'pngSolid') && isfile(voltRasterRes.pngSolid)
+%         pngList{end+1} = voltRasterRes.pngSolid; lblList{end+1} = 'VoltageRaster SOLID';
+%     end
+%     if isfield(voltRasterRes, 'pngSputter') && isfile(voltRasterRes.pngSputter)
+%         pngList{end+1} = voltRasterRes.pngSputter; lblList{end+1} = 'VoltageRaster SPUTTER';
+%     end
+% end
 
-function x = getfieldsafe(S, fname, defaultVal)
-if nargin<3, defaultVal = []; end
-if isstruct(S) && isfield(S,fname)
-    x = S.(fname);
+% % CSD raster (avg) (placeholder)
+% if exist('csdRasterRes','var') && ~isempty(csdRasterRes)
+%     if isfield(csdRasterRes, 'pngSolid') && isfile(csdRasterRes.pngSolid)
+%         pngList{end+1} = csdRasterRes.pngSolid; lblList{end+1} = 'CSDRaster SOLID';
+%     end
+%     if isfield(csdRasterRes, 'pngSputter') && isfile(csdRasterRes.pngSputter)
+%         pngList{end+1} = csdRasterRes.pngSputter; lblList{end+1} = 'CSDRaster SPUTTER';
+%     end
+% end
+
+% % CSD center slices + waveforms (placeholder)
+% if exist('csdSlicesRes','var') && ~isempty(csdSlicesRes)
+%     if isfield(csdSlicesRes, 'pngSolid') && isfile(csdSlicesRes.pngSolid)
+%         pngList{end+1} = csdSlicesRes.pngSolid; lblList{end+1} = 'CSD Slices SOLID';
+%     end
+%     if isfield(csdSlicesRes, 'pngSputter') && isfile(csdSlicesRes.pngSputter)
+%         pngList{end+1} = csdSlicesRes.pngSputter; lblList{end+1} = 'CSD Slices SPUTTER';
+%     end
+% end
+
+% % CSD time-avg waveforms (placeholder)
+% if exist('csdTimeAvgRes','var') && ~isempty(csdTimeAvgRes)
+%     if isfield(csdTimeAvgRes, 'pngSolid') && isfile(csdTimeAvgRes.pngSolid)
+%         pngList{end+1} = csdTimeAvgRes.pngSolid; lblList{end+1} = 'CSD TimeAvg SOLID';
+%     end
+%     if isfield(csdTimeAvgRes, 'pngSputter') && isfile(csdTimeAvgRes.pngSputter)
+%         pngList{end+1} = csdTimeAvgRes.pngSputter; lblList{end+1} = 'CSD TimeAvg SPUTTER';
+%     end
+% end
+
+if isempty(pngList)
+    warning('No PNGs found yet; master montage not created.');
 else
-    x = defaultVal;
-end
-end
-
-function s = scalarify(x, nanIfEmpty)
-if nargin<2, nanIfEmpty = NaN; end
-% turn anything into a scalar double
-if isempty(x)
-    s = nanIfEmpty; return;
-end
-if isstruct(x) || istable(x) || iscell(x)
-    s = nanIfEmpty; return;
-end
-x = double(x);
-if ~isvector(x)
-    s = mean(x(:), 'omitnan');  % squeeze matrices to scalar
-else
-    if numel(x)==1
-        s = x;
-    else
-        s = mean(x, 'omitnan'); % vector -> scalar mean
+    try
+        makeMontage(pngList, lblList, masterPng);
+        fprintf('Master montage saved: %s\n', masterPng);
+    catch ME
+        warning('Failed to build master montage: %s', ME.message);
     end
 end
-if isempty(s), s = nanIfEmpty; end
-end
 
-function m = scalarMean(v)
-% vector/array -> scalar mean (NaN-safe); empty -> NaN
-if isempty(v)
-    m = NaN;
-else
-    m = mean(double(v(:)), 'omitnan');
-end
-end
+% ---------- Merge whatever stats exist into CSV ----------
+T = table(); % start empty
 
-function v = asVec(x, nCh)
-% ensure a length-nCh column vector of doubles (NaN-filled if needed)
-x = double(x);
-if isempty(x)
-    v = nan(nCh,1);
-else
-    x = x(:);
-    if numel(x) < nCh
-        v = nan(nCh,1);
-        v(1:numel(x)) = x;
-    else
-        v = x(1:nCh);
+if ~isempty(evtStacksRes) && isfield(evtStacksRes, 'statsCSV') && isfile(evtStacksRes.statsCSV)
+    try
+        T1 = readtable(evtStacksRes.statsCSV);
+        T = vertcatSafe(T, T1);
+    catch ME
+        warning('Failed reading EventStacks stats CSV: %s', ME.message);
     end
 end
+
+% % Additional components: append their CSVs similarly...
+% if exist('voltRasterRes','var') && isfield(voltRasterRes,'statsCSV') && isfile(voltRasterRes.statsCSV)
+%     T = vertcatSafe(T, readtable(voltRasterRes.statsCSV));
+% end
+
+% Finally write the master CSV (even if empty, we create the file so downstream always finds it)
+try
+    if isempty(T)
+        % Create a minimal empty table with a helpful column
+        T = table(string(datetime('now')), "EMPTY", 'VariableNames', {'GeneratedAt','Note'});
+    end
+    writetable(T, masterCSV);
+    fprintf('Master stats CSV: %s\n', masterCSV);
+catch ME
+    warning('Failed writing master stats CSV: %s', ME.message);
 end
 
-function v = getIdx(vec, idx)
-% safe indexing returning NaN if out-of-range
-if idx>=1 && idx<=numel(vec) && ~isempty(vec(idx))
-    v = vec(idx);
-else
-    v = NaN;
 end
+
+% ----------------- helpers -----------------
+
+function T = vertcatSafe(A, B)
+% VERTCAT two tables, reconciling mismatched variable sets by outer-joining columns
+if isempty(A), T = B; return; end
+if isempty(B), T = A; return; end
+allVars = union(A.Properties.VariableNames, B.Properties.VariableNames);
+A = addMissingVars(A, allVars);
+B = addMissingVars(B, allVars);
+T = [A; B]; %#ok<AGROW>
+end
+
+function T = addMissingVars(T, allVars)
+missing = setdiff(allVars, T.Properties.VariableNames);
+for k = 1:numel(missing)
+    T.(missing{k}) = missingDefault();
+end
+T = T(:, allVars);
+end
+
+function x = missingDefault()
+x = missing;  % MATLAB missing value (works for string/categorical); for numeric will upcast later as needed
+end
+
+function makeMontage(pngList, lblList, outPath)
+% Simple vertical montage of available PNGs with labels
+n = numel(pngList);
+figH = min(350 + 320*n, 9000);
+f = figure('Color','w','Position',[80 80 1200 figH],'Visible','off');
+t = tiledlayout(f, n, 1, 'Padding','compact','TileSpacing','compact');
+
+for i = 1:n
+    ax = nexttile(t); axis(ax,'off'); hold(ax,'on');
+    try
+        I = imread(pngList{i});
+        image(ax, I); axis(ax,'image'); axis(ax,'off');
+        title(ax, lblList{i}, 'FontSize', 11, 'FontWeight', 'bold', 'Interpreter','none');
+    catch ME
+        text(ax, 0.5, 0.5, sprintf('Missing or unreadable: %s\n%s', pngList{i}, ME.message), ...
+            'HorizontalAlignment','center','VerticalAlignment','middle', ...
+            'FontSize',10, 'Color',[0.7 0 0], 'Interpreter','none');
+        axis(ax,'off');
+    end
+end
+
+exportgraphics(f, outPath, 'Resolution', 220);
+close(f);
 end
