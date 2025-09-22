@@ -24,8 +24,11 @@ Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users
 Error using tabular/vertcat
 An error occurred when concatenating the table variable 'AmpMean_uV' using vertcat.
 
-Error in Pipeline_Main (line 109)
-        allStats = [allStats; row]; %#ok<AGROW>
+Error in Pipeline_Main>statsFrom_EventStacks (line 101)
+    grpTbl = [grpTbl; rowG];
+
+Error in Pipeline_Main (line 30)
+[grpTbl, chTbl] = statsFrom_EventStacks(evstacksOut);
 
 Error in main (line 21)
 Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
@@ -33,3 +36,4 @@ Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users
 Caused by:
     Error using vertcat
     Dimensions of arrays being concatenated are not consistent.
+ 
