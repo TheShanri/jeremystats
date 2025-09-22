@@ -20,7 +20,7 @@ evtStacksRes = [];
 try
     evtStacksRes = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
 catch ME
-    warning(ME.identifier, 'EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
+    warning('EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
 end
 
 % ---------- 2) VoltageRaster_EventsAvg_Pipeline ----------
@@ -28,15 +28,15 @@ voltRasterRes = [];
 try
     voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
 catch ME
-    warning(ME.identifier, 'VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
+    warning('VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 3) CSDRaster_Avg_Pipeline ----------
+% ---------- 3) CSDRaster_Avg_Pipeline (NEW) ----------
 csdRasterRes = [];
 try
     csdRasterRes = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
 catch ME
-    warning(ME.identifier, 'CSDRaster_Avg_Pipeline failed: %s', ME.message);
+    warning('CSDRaster_Avg_Pipeline failed: %s', ME.message);
 end
 
 % ---------- 4) CSD_CenterSlices_Waveform_AvgGroups_Pipeline ----------
@@ -44,7 +44,7 @@ end
 % try
 %     csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
 % catch ME
-%     warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
+%     warning('CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
 % end
 
 % ---------- 5) CSD_TimeAvg_Waveform_AvgGroups_Pipeline ----------
@@ -52,7 +52,7 @@ end
 % try
 %     csdTimeAvgRes = CSD_TimeAvg_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
 % catch ME
-%     warning(ME.identifier, 'CSD_TimeAvg_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
+%     warning('CSD_TimeAvg_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
 % end
 
 % ---------- Collect PNGs ----------
@@ -71,58 +71,61 @@ if ~isempty(voltRasterRes)
     if isfield(voltRasterRes, 'pngSputter') && isfile(voltRasterRes.pngSputter), pngSPU{end+1} = voltRasterRes.pngSputter; end
 end
 
-% CSD Raster
+% CSD Raster (NEW)
 if ~isempty(csdRasterRes)
     if isfield(csdRasterRes, 'pngSolid')   && isfile(csdRasterRes.pngSolid),   pngSOL{end+1} = csdRasterRes.pngSolid; end
     if isfield(csdRasterRes, 'pngSputter') && isfile(csdRasterRes.pngSputter), pngSPU{end+1} = csdRasterRes.pngSputter; end
 end
 
+% % CSD center slices
+% if ~isempty(csdSlicesRes)
+%     if isfield(csdSlicesRes, 'pngSolid')   && isfile(csdSlicesRes.pngSolid),   pngSOL{end+1} = csdSlicesRes.pngSolid; end
+%     if isfield(csdSlicesRes, 'pngSputter') && isfile(csdSlicesRes.pngSputter), pngSPU{end+1} = csdSlicesRes.pngSputter; end
+% end
+% % CSD time-avg
+% if ~isempty(csdTimeAvgRes)
+%     if isfield(csdTimeAvgRes, 'pngSolid')   && isfile(csdTimeAvgRes.pngSolid),   pngSOL{end+1} = csdTimeAvgRes.pngSolid; end
+%     if isfield(csdTimeAvgRes, 'pngSputter') && isfile(csdTimeAvgRes.pngSputter), pngSPU{end+1} = csdTimeAvgRes.pngSputter; end
+% end
+
 % ---------- Build two hi-res montages ----------
 if isempty(pngSOL)
-    warning('Pipeline:NoSolidPNGs', 'No SOLID PNGs found; SOLID montage not created.');
+    warning('No SOLID PNGs found; SOLID montage not created.');
 else
     try
         makeMontageHiRes(pngSOL, masterPngSOLID);
         fprintf('Master SOLID montage saved: %s\n', masterPngSOLID);
     catch ME
-        warning(ME.identifier, 'Failed to build SOLID montage: %s', ME.message);
+        warning('Failed to build SOLID montage: %s', ME.message);
     end
 end
 
 if isempty(pngSPU)
-    warning('Pipeline:NoSputterPNGs', 'No SPUTTER PNGs found; SPUTTER montage not created.');
+    warning('No SPUTTER PNGs found; SPUTTER montage not created.');
 else
     try
         makeMontageHiRes(pngSPU, masterPngSPUTTER);
         fprintf('Master SPUTTER montage saved: %s\n', masterPngSPUTTER);
     catch ME
-        warning(ME.identifier, 'Failed to build SPUTTER montage: %s', ME.message);
+        warning('Failed to build SPUTTER montage: %s', ME.message);
     end
 end
 
 % ---------- Merge available stats into a single CSV ----------
 T = table();
+% EventStacks CSV
 if ~isempty(evtStacksRes) && isfield(evtStacksRes, 'statsCSV') && isfile(evtStacksRes.statsCSV)
-    try
-        T = vertcatSafe(T, readtable(evtStacksRes.statsCSV));
-    catch ME
-        warning(ME.identifier, 'Failed to read EventStacks stats CSV: %s', ME.message);
-    end
+    try, T = vertcatSafe(T, readtable(evtStacksRes.statsCSV)); catch, end
 end
+% Voltage Raster CSV
 if ~isempty(voltRasterRes) && isfield(voltRasterRes, 'statsCSV') && isfile(voltRasterRes.statsCSV)
-    try
-        T = vertcatSafe(T, readtable(voltRasterRes.statsCSV));
-    catch ME
-        warning(ME.identifier, 'Failed to read VoltageRaster stats CSV: %s', ME.message);
-    end
+    try, T = vertcatSafe(T, readtable(voltRasterRes.statsCSV)); catch, end
 end
+% CSD Raster CSV (NEW)
 if ~isempty(csdRasterRes) && isfield(csdRasterRes, 'statsCSV') && isfile(csdRasterRes.statsCSV)
-    try
-        T = vertcatSafe(T, readtable(csdRasterRes.statsCSV));
-    catch ME
-        warning(ME.identifier, 'Failed to read CSDRaster stats CSV: %s', ME.message);
-    end
+    try, T = vertcatSafe(T, readtable(csdRasterRes.statsCSV)); catch, end
 end
+% (Append other CSVs here as they come online)
 
 try
     if isempty(T)
@@ -131,7 +134,7 @@ try
     writetable(T, masterCSV);
     fprintf('Master stats CSV: %s\n', masterCSV);
 catch ME
-    warning(ME.identifier, 'Failed writing master stats CSV: %s', ME.message);
+    warning('Failed writing master stats CSV: %s', ME.message);
 end
 
 end
@@ -179,6 +182,7 @@ end
 Wmax = max(widths);
 sep  = 6; % white separator in pixels
 
+% Output class and white value
 cls = class(imgs{1});
 switch cls
     case {'uint8'},  whiteVal = uint8(255);
