@@ -180,17 +180,21 @@ end
 
 % ---------------- Package for pipeline return ----------------
 out = struct;
-out.module     = 'EventStacks_ampWidth_Avg';
-out.inputDir   = inputFolder;
-out.dataMat    = dataMatPath;
-out.yMaxGlobal = yMax;
-out.tRelMs     = tRelMs;
-out.channelList = chList;
+out.module        = 'EventStacks_ampWidth_Avg';
+out.inputDir      = inputFolder;
+out.dataMat       = dataMatPath;
+out.yMaxGlobal    = yMax;
+out.tRelMs        = tRelMs;
+out.channelList   = chList;
 out.kept_channels = kept_channels;
-out.groups  = [];
+
+% IMPORTANT: initialize as an EMPTY STRUCT ARRAY (not numeric [])
+out.groups = struct('tag',{},'pngPath',{},'nEventsUsed',{},'tRelMs',{}, ...
+                    'ampMean',{},'ampSD',{},'hwMean',{},'hwSD',{}, ...
+                    'MU',{},'SE',{},'n',{});
 
 if ~isempty(SOL)
-    out.groups(end+1) = packGroup('SOLID', SOL, pngSOL); %#ok<AGROW>
+    out.groups(end+1) = packGroup('SOLID',   SOL, pngSOL); %#ok<AGROW>
 end
 if ~isempty(SPU)
     out.groups(end+1) = packGroup('SPUTTER', SPU, pngSPU); %#ok<AGROW>
@@ -198,8 +202,11 @@ end
 
 % If the main wants faint overlays, include traces (heavy) now
 if returnTraces
-    if ~isempty(SOL), out.groups(strcmp({out.groups.tag},'SOLID')).traces = SOL.traces; end
-    if ~isempty(SPU), out.groups(strcmp({out.groups.tag},'SPUTTER')).traces = SPU.traces; end
+    % attach safely by index
+    iS = find(strcmp({out.groups.tag},'SOLID'),1);
+    if ~isempty(iS), out.groups(iS).traces = SOL.traces; end
+    iP = find(strcmp({out.groups.tag},'SPUTTER'),1);
+    if ~isempty(iP), out.groups(iP).traces = SPU.traces; end
 end
 
 % ======================================================================
@@ -327,14 +334,14 @@ function [G, robAll] = avgForGroup(evtList, tag)
     end
 
     % Collapse metrics & compute MU/SE
-    if isfield(G,'ampMean')
+    if isfield(G,'ampMean') && ~isempty(G.ampMean)
         G.ampSD = nan(nCh,1); G.hwSD = nan(nCh,1);
         for k=1:nCh
             a = G.ampMean(k,:); w = G.hwMean(k,:);
             G.ampSD(k) = std(a, 0, 'omitnan');
             G.hwSD(k)  = std(w, 0, 'omitnan');
             G.ampMean(k) = mean(a, 'omitnan');
-            G.hwMean(k)  = mean(w, 'omitnan');
+            G.hwMean(k)  = mean(w,  'omitnan');
         end
     else
         G.ampMean = nan(nCh,1); G.ampSD = nan(nCh,1);
@@ -362,17 +369,12 @@ end
 
 function pngPath = plotStackWithIndicators(G, tag, yL, outRoot)
     if isempty(G) || all(all(isnan(G.MU))), warning('%s: no data to plot.', tag); pngPath=""; return; end
-
-    % ---- compact rendering omitted here for brevity ----
-    % (unchanged from your previous version; keeps faint overlays, etc.)
-
-    % For pipeline: still save if requested
     perRowPx = 120; basePx = 220; maxPx = 5200;
     figH = min(maxPx, basePx + perRowPx * size(G.MU,1));
     f = figure('Color','w','Position',[60 60 1100 figH],'Visible','off');
     tl = tiledlayout(f, ceil(size(G.MU,1)/2), 2, 'Padding','compact','TileSpacing','compact');
 
-    % (Plotting body omitted… use your existing block.)
+    % (Plotting body omitted… use your existing block that draws faint traces, mean±SEM, indicators, etc.)
 
     pngPath = fullfile(outRoot, sprintf('AvgStack_%s.png', tag));
     exportgraphics(f, pngPath, 'Resolution', 220);
