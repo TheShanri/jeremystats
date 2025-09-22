@@ -1,6 +1,12 @@
 function Pipeline_Main(inputFolder, dataMatPath, varargin)
-% Pipeline_Main — orchestrates sub-pipelines and builds TWO master montages
-% (SOLID / SPUTTER) and a merged CSV. Robust to missing pieces.
+% Pipeline_Main
+% Orchestrates sub-pipelines and builds TWO master, hi-res montages:
+%   Pipeline Output/Master_Montage_SOLID.png
+%   Pipeline Output/Master_Montage_SPUTTER.png
+% Also merges available stats CSVs into:
+%   Pipeline Output/Master_Stats.csv
+
+opts = struct(varargin{:}); %#ok<NASGU>
 
 % ---------- Output hub ----------
 masterOutDir = fullfile(inputFolder, 'Pipeline Output');
@@ -9,7 +15,7 @@ masterPngSOLID   = fullfile(masterOutDir, 'Master_Montage_SOLID.png');
 masterPngSPUTTER = fullfile(masterOutDir, 'Master_Montage_SPUTTER.png');
 masterCSV        = fullfile(masterOutDir, 'Master_Stats.csv');
 
-% ---------- 1) EventStacks ----------
+% ---------- 1) EventStacks_ampWidth_Avg_Pipeline ----------
 evtStacksRes = [];
 try
     evtStacksRes = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -17,7 +23,7 @@ catch ME
     warning(ME.identifier, 'EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 2) Voltage Raster (averages) ----------
+% ---------- 2) VoltageRaster_EventsAvg_Pipeline ----------
 voltRasterRes = [];
 try
     voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -25,7 +31,7 @@ catch ME
     warning(ME.identifier, 'VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 3) CSD Raster (averages) ----------
+% ---------- 3) CSDRaster_Avg_Pipeline ----------
 csdRasterRes = [];
 try
     csdRasterRes = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -33,15 +39,15 @@ catch ME
     warning(ME.identifier, 'CSDRaster_Avg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 4) CSD Center Slices + Vertical Waveforms ----------
-csdSlicesRes = [];
-try
-    csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
-catch ME
-    warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
-end
+% ---------- 4) CSD_CenterSlices_Waveform_AvgGroups_Pipeline ----------
+% csdSlicesRes = [];
+% try
+%     csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
+% catch ME
+%     warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
+% end
 
-% ---------- 5) (placeholder) CSD Time-Avg ----------
+% ---------- 5) CSD_TimeAvg_Waveform_AvgGroups_Pipeline ----------
 % csdTimeAvgRes = [];
 % try
 %     csdTimeAvgRes = CSD_TimeAvg_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -49,57 +55,27 @@ end
 %     warning(ME.identifier, 'CSD_TimeAvg_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
 % end
 
-% ---------- Collect PNGs IN A FIXED ORDER ----------
-% Order per montage row-stack:
-%   1) EventStacks
-%   2) Voltage Raster (avg)
-%   3) CSD Raster (avg)           <-- normal CSD
-%   4) CSD Center Slices (0 ms)   <-- slices + vertical waveforms
+% ---------- Collect PNGs ----------
 pngSOL = {};
 pngSPU = {};
 
-appendIf = @(cellarr, pathstr) ...
-    ( ~isempty(pathstr) && ischar(pathstr) || isstring(pathstr) ) && isfile(pathstr);
+% EventStacks
+if ~isempty(evtStacksRes)
+    if isfield(evtStacksRes, 'pngSolid')   && isfile(evtStacksRes.pngSolid),   pngSOL{end+1} = evtStacksRes.pngSolid; end
+    if isfield(evtStacksRes, 'pngSputter') && isfile(evtStacksRes.pngSputter), pngSPU{end+1} = evtStacksRes.pngSputter; end
+end
 
-% helper to push in order (and avoid duplicates)
-    function pushOrdered(isSolid, p1, p2, p3, p4)
-        tgt = tern(isSolid, 'SOL', 'SPU');
-        if isSolid
-            lst = pngSOL;
-        else
-            lst = pngSPU;
-        end
+% Voltage Raster
+if ~isempty(voltRasterRes)
+    if isfield(voltRasterRes, 'pngSolid')   && isfile(voltRasterRes.pngSolid),   pngSOL{end+1} = voltRasterRes.pngSolid; end
+    if isfield(voltRasterRes, 'pngSputter') && isfile(voltRasterRes.pngSputter), pngSPU{end+1} = voltRasterRes.pngSputter; end
+end
 
-        order = {p1, p2, p3, p4};  % fixed order
-        for ii = 1:numel(order)
-            p = order{ii};
-            if appendIf(lst, p)
-                if ~any(strcmp(lst, p))
-                    lst{end+1} = char(p); %#ok<AGROW>
-                end
-            end
-        end
-
-        if isSolid, pngSOL = lst; else, pngSPU = lst; end %#ok<NASGU>
-        fprintf('Collected %s PNGs (%d so far).\n', tgt, numel(lst));
-    end
-
-% Extract paths by type, tolerant to missing fields
-E_solid = getFieldSafe(evtStacksRes,'pngSolid');
-E_sputt = getFieldSafe(evtStacksRes,'pngSputter');
-
-V_solid = getFieldSafe(voltRasterRes,'pngSolid');
-V_sputt = getFieldSafe(voltRasterRes,'pngSputter');
-
-CR_solid = getFieldSafe(csdRasterRes,'pngSolid');     % NORMAL CSD RASTER
-CR_sputt = getFieldSafe(csdRasterRes,'pngSputter');
-
-CS_solid = getFieldSafe(csdSlicesRes,'pngSolid');     % CSD CENTER SLICES
-CS_sputt = getFieldSafe(csdSlicesRes,'pngSputter');
-
-% Push in fixed order for SOLID / SPUTTER independently
-pushOrdered(true,  E_solid, V_solid, CR_solid, CS_solid);
-pushOrdered(false, E_sputt, V_sputt, CR_sputt, CS_sputt);
+% CSD Raster
+if ~isempty(csdRasterRes)
+    if isfield(csdRasterRes, 'pngSolid')   && isfile(csdRasterRes.pngSolid),   pngSOL{end+1} = csdRasterRes.pngSolid; end
+    if isfield(csdRasterRes, 'pngSputter') && isfile(csdRasterRes.pngSputter), pngSPU{end+1} = csdRasterRes.pngSputter; end
+end
 
 % ---------- Build two hi-res montages ----------
 if isempty(pngSOL)
@@ -126,10 +102,27 @@ end
 
 % ---------- Merge available stats into a single CSV ----------
 T = table();
-T = tryAddCSV(T, evtStacksRes,  'EventStacks');
-T = tryAddCSV(T, voltRasterRes, 'VoltageRaster');
-T = tryAddCSV(T, csdRasterRes,  'CSDRaster');       % normal CSD
-T = tryAddCSV(T, csdSlicesRes,  'CSDCenterSlices'); % slices/vertical
+if ~isempty(evtStacksRes) && isfield(evtStacksRes, 'statsCSV') && isfile(evtStacksRes.statsCSV)
+    try
+        T = vertcatSafe(T, readtable(evtStacksRes.statsCSV));
+    catch ME
+        warning(ME.identifier, 'Failed to read EventStacks stats CSV: %s', ME.message);
+    end
+end
+if ~isempty(voltRasterRes) && isfield(voltRasterRes, 'statsCSV') && isfile(voltRasterRes.statsCSV)
+    try
+        T = vertcatSafe(T, readtable(voltRasterRes.statsCSV));
+    catch ME
+        warning(ME.identifier, 'Failed to read VoltageRaster stats CSV: %s', ME.message);
+    end
+end
+if ~isempty(csdRasterRes) && isfield(csdRasterRes, 'statsCSV') && isfile(csdRasterRes.statsCSV)
+    try
+        T = vertcatSafe(T, readtable(csdRasterRes.statsCSV));
+    catch ME
+        warning(ME.identifier, 'Failed to read CSDRaster stats CSV: %s', ME.message);
+    end
+end
 
 try
     if isempty(T)
@@ -140,33 +133,10 @@ try
 catch ME
     warning(ME.identifier, 'Failed writing master stats CSV: %s', ME.message);
 end
+
 end
 
 % ----------------- helpers -----------------
-
-function v = getFieldSafe(s, fn)
-if isstruct(s) && isfield(s, fn)
-    v = s.(fn);
-else
-    v = "";
-end
-end
-
-function r = tern(c, a, b), if c, r = a; else, r = b; end, end
-
-function T = tryAddCSV(T, res, tag)
-try
-    if isstruct(res) && isfield(res,'statsCSV') && isfile(res.statsCSV)
-        C = readtable(res.statsCSV);
-        if ~ismember('source', C.Properties.VariableNames)
-            C.source = repmat(string(tag), height(C), 1);
-        end
-        T = vertcatSafe(T, C);
-    end
-catch ME
-    warning(ME.identifier, 'Failed to merge stats from %s: %s', tag, ME.message);
-end
-end
 
 function T = vertcatSafe(A, B)
 if isempty(A), T = B; return; end
@@ -185,7 +155,9 @@ end
 T = T(:, allVars);
 end
 
-function x = missingDefault(), x = missing; end
+function x = missingDefault()
+x = missing;
+end
 
 function makeMontageHiRes(pngList, outPath)
 % Stack images vertically at NATIVE resolution (no resampling).
