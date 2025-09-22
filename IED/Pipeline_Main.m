@@ -1,6 +1,15 @@
 function Pipeline_Main(inputFolder, dataMatPath, varargin)
 % Pipeline_Main — orchestrates sub-pipelines and builds TWO master montages
-% and a merged CSV. Robust to missing pieces.
+% (SOLID, SPUTTER) at native resolution, plus a merged stats CSV.
+%
+% Sub-pipelines it tries to run (order = also montage order):
+%   1) EventStacks_ampWidth_Avg_Pipeline
+%   2) VoltageRaster_EventsAvg_Pipeline
+%   3) CSDRaster_Avg_Pipeline
+%   4) CSD_CenterSlices_Waveform_AvgGroups_Pipeline
+%   5) CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline
+%
+% Robust to missing images/CSVs: warns and continues.
 
 % ---------- Output hub ----------
 masterOutDir = fullfile(inputFolder, 'Pipeline Output');
@@ -8,6 +17,13 @@ if ~exist(masterOutDir, 'dir'), mkdir(masterOutDir); end
 masterPngSOLID   = fullfile(masterOutDir, 'Master_Montage_SOLID.png');
 masterPngSPUTTER = fullfile(masterOutDir, 'Master_Montage_SPUTTER.png');
 masterCSV        = fullfile(masterOutDir, 'Master_Stats.csv');
+
+% ---------- 0) (optional) spike detection placeholder ----------
+% try
+%     SpikeDetect_Pipeline(inputFolder, dataMatPath, varargin{:});
+% catch ME
+%     warning(ME.identifier, 'SpikeDetect_Pipeline failed: %s', ME.message);
+% end
 
 % ---------- 1) EventStacks ----------
 evtStacksRes = [];
@@ -33,7 +49,7 @@ catch ME
     warning(ME.identifier, 'CSDRaster_Avg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 4) CSD Center Slices + Vertical Waveforms (this request) ----------
+% ---------- 4) CSD Center Slices + Vertical Waveforms ----------
 csdSlicesRes = [];
 try
     csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -41,43 +57,28 @@ catch ME
     warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 5) (placeholder) CSD Time-Avg ----------
-% csdTimeAvgRes = [];
-% try
-%     csdTimeAvgRes = CSD_TimeAvg_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
-% catch ME
-%     warning(ME.identifier, 'CSD_TimeAvg_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
-% end
+% ---------- 5) CSD Time-Avg Slices + Vertical Waveforms ----------
+csdTimeAvgRes = [];
+try
+    csdTimeAvgRes = CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
+catch ME
+    warning(ME.identifier, 'CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline failed: %s', ME.message);
+end
 
-% ---------- Collect PNGs ----------
+% ---------- Collect PNGs in fixed order ----------
+% Order in montage (top-to-bottom):
+%   EventStacks → Voltage Raster → CSD Raster → CSD Center Slices → CSD Time-Avg
 pngSOL = {};
 pngSPU = {};
 
-% EventStacks
-if isstruct(evtStacksRes)
-    if isfield(evtStacksRes, 'pngSolid')   && isfile(evtStacksRes.pngSolid),   pngSOL{end+1} = evtStacksRes.pngSolid; end
-    if isfield(evtStacksRes, 'pngSputter') && isfile(evtStacksRes.pngSputter), pngSPU{end+1} = evtStacksRes.pngSputter; end
+resList = {evtStacksRes, voltRasterRes, csdRasterRes, csdSlicesRes, csdTimeAvgRes};
+for i = 1:numel(resList)
+    R = resList{i};
+    pngSOL = addIfExists(pngSOL, getFieldSafe(R,'pngSolid'));
+    pngSPU = addIfExists(pngSPU, getFieldSafe(R,'pngSputter'));
 end
 
-% Voltage Raster
-if isstruct(voltRasterRes)
-    if isfield(voltRasterRes, 'pngSolid')   && isfile(voltRasterRes.pngSolid),   pngSOL{end+1} = voltRasterRes.pngSolid; end
-    if isfield(voltRasterRes, 'pngSputter') && isfile(voltRasterRes.pngSputter), pngSPU{end+1} = voltRasterRes.pngSputter; end
-end
-
-% CSD Raster
-if isstruct(csdRasterRes)
-    if isfield(csdRasterRes, 'pngSolid')   && isfile(csdRasterRes.pngSolid),   pngSOL{end+1} = csdRasterRes.pngSolid; end
-    if isfield(csdRasterRes, 'pngSputter') && isfile(csdRasterRes.pngSputter), pngSPU{end+1} = csdRasterRes.pngSputter; end
-end
-
-% CSD Center Slices
-if isstruct(csdSlicesRes)
-    if isfield(csdSlicesRes, 'pngSolid')   && isfile(csdSlicesRes.pngSolid),   pngSOL{end+1} = csdSlicesRes.pngSolid; end
-    if isfield(csdSlicesRes, 'pngSputter') && isfile(csdSlicesRes.pngSputter), pngSPU{end+1} = csdSlicesRes.pngSputter; end
-end
-
-% ---------- Build two hi-res montages ----------
+% ---------- Build two hi-res montages (native resolution, no resampling) ----------
 if isempty(pngSOL)
     warning('Pipeline:NoSolidPNGs', 'No SOLID PNGs found; SOLID montage not created.');
 else
@@ -106,6 +107,7 @@ T = tryAddCSV(T, evtStacksRes,  'EventStacks');
 T = tryAddCSV(T, voltRasterRes, 'VoltageRaster');
 T = tryAddCSV(T, csdRasterRes,  'CSDRaster');
 T = tryAddCSV(T, csdSlicesRes,  'CSDCenterSlices');
+T = tryAddCSV(T, csdTimeAvgRes, 'CSDTimeAvg');
 
 try
     if isempty(T)
@@ -118,14 +120,37 @@ catch ME
 end
 end
 
-% ----------------- helpers -----------------
+% ================= helpers =================
+
+function v = getFieldSafe(S, fieldName)
+% return "" if struct missing field or empty
+if ~(isstruct(S) && isfield(S, fieldName))
+    v = "";
+else
+    v = string(S.(fieldName));
+end
+end
+
+function L = addIfExists(L, pathStr)
+% append if it's a non-empty existing file; keep order; avoid duplicates
+if strlength(pathStr) > 0
+    p = char(pathStr);
+    if isfile(p) && ~any(strcmp(L, p))
+        L{end+1} = p; %#ok<AGROW>
+    end
+end
+end
 
 function T = tryAddCSV(T, res, tag)
+% read res.statsCSV if present; add 'source' column; outer-join schema
 try
-    if isstruct(res) && isfield(res,'statsCSV') && isfile(res.statsCSV)
+    if isstruct(res) && isfield(res,'statsCSV') && ~isempty(res.statsCSV) && isfile(res.statsCSV)
         C = readtable(res.statsCSV);
         if ~ismember('source', C.Properties.VariableNames)
             C.source = repmat(string(tag), height(C), 1);
+        else
+            % ensure it's a string column for consistency
+            C.source = string(C.source);
         end
         T = vertcatSafe(T, C);
     end
@@ -135,16 +160,17 @@ end
 end
 
 function T = vertcatSafe(A, B)
+% outer-union by variable names, then vertical concat
 if isempty(A), T = B; return; end
 if isempty(B), T = A; return; end
-allVars = union(A.Properties.VariableNames, B.Properties.VariableNames);
+allVars = union(A.Properties.VariableNames, B.Properties.VariableNames, 'stable');
 A = addMissingVars(A, allVars);
 B = addMissingVars(B, allVars);
 T = [A; B]; %#ok<AGROW>
 end
 
 function T = addMissingVars(T, allVars)
-missing = setdiff(allVars, T.Properties.VariableNames);
+missing = setdiff(allVars, T.Properties.VariableNames, 'stable');
 for k = 1:numel(missing)
     T.(missing{k}) = missingDefault();
 end
@@ -197,7 +223,7 @@ for i = 1:numel(imgs)
     [h,w,c] = size(I);
     out(y:y+h-1, 1:w, 1:c) = I;
     y = y + h;
-    if i < numel(imgs), y = y + sep; end
+    if i < numel(imgs), out(y:y+sep-1, :, :) = whiteVal; y = y + sep; end
 end
 
 imwrite(out, outPath);
