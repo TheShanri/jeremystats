@@ -1,22 +1,20 @@
 function Pipeline_Main(inputFolder, dataMatPath, varargin)
-% Pipeline_Main — orchestrates sub-pipelines and builds TWO compact masters
-% (SOLID, SPUTTER) + merged stats CSV. Lots of verbose logging.
+% Pipeline_Main — runs all sub-pipelines, builds TWO compact triptychs
+% (SOLID & SPUTTER) at native resolution, plus a merged stats CSV.
 %
-% Column layout per group:
-%   LEFT  : VoltageRaster_EventsAvg + CSD_CenterSlices_Waveform_AvgGroups
-%   MIDDLE: EventStacks_ampWidth_Avg (tall)
-%   RIGHT : CSDRaster_Avg + CSD_TimeAvgSlices_Waveforms_AvgGroups
+% Triptych columns (left → center → right):
+%   LEFT  : [VoltageRaster_EventsAvg, CSD_CenterSlices_Waveform_AvgGroups]  (stacked vertically)
+%   CENTER: [EventStacks_ampWidth_Avg]  (the long one)
+%   RIGHT : [CSDRaster_Avg, CSD_TimeAvgSlices_Waveforms_AvgGroups]          (stacked vertically)
 %
-% All images are composed at native resolution. No resampling.
-
-fprintf('\n=== Pipeline_Main starting ===\n');
+% Robust to missing images/CSVs (warns and continues).
 
 % ---------- Output hub ----------
 masterOutDir = fullfile(inputFolder, 'Pipeline Output');
 if ~exist(masterOutDir, 'dir'), mkdir(masterOutDir); end
-masterPngSOLID   = fullfile(masterOutDir, 'Master_Compact_SOLID.png');
-masterPngSPUTTER = fullfile(masterOutDir, 'Master_Compact_SPUTTER.png');
-masterCSV        = fullfile(masterOutDir, 'Master_Stats.csv');
+triptychSOLID   = fullfile(masterOutDir, 'Master_Compact_SOLID.png');
+triptychSPUTTER = fullfile(masterOutDir, 'Master_Compact_SPUTTER.png');
+masterCSV       = fullfile(masterOutDir, 'Master_Stats.csv');
 
 % ---------- 0) (optional) spike detection placeholder ----------
 % try
@@ -25,7 +23,7 @@ masterCSV        = fullfile(masterOutDir, 'Master_Stats.csv');
 %     warning(ME.identifier, 'SpikeDetect_Pipeline failed: %s', ME.message);
 % end
 
-% ---------- 1) EventStacks ----------
+% ---------- 1) EventStacks (CENTER) ----------
 evtStacksRes = [];
 try
     evtStacksRes = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -33,7 +31,7 @@ catch ME
     warning(ME.identifier, 'EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 2) Voltage Raster (averages) ----------
+% ---------- 2) Voltage Raster (LEFT) ----------
 voltRasterRes = [];
 try
     voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -41,7 +39,7 @@ catch ME
     warning(ME.identifier, 'VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 3) CSD Raster (averages) ----------
+% ---------- 3) CSD Raster (RIGHT) ----------
 csdRasterRes = [];
 try
     csdRasterRes = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -49,7 +47,7 @@ catch ME
     warning(ME.identifier, 'CSDRaster_Avg_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 4) CSD Center Slices + Vertical Waveforms ----------
+% ---------- 4) CSD Center Slices + Vertical Waveforms (LEFT) ----------
 csdSlicesRes = [];
 try
     csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -57,7 +55,7 @@ catch ME
     warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
 end
 
-% ---------- 5) CSD Time-Avg Slices + Vertical Waveforms ----------
+% ---------- 5) CSD Time-Avg Slices + Vertical Waveforms (RIGHT) ----------
 csdTimeAvgRes = [];
 try
     csdTimeAvgRes = CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
@@ -65,47 +63,46 @@ catch ME
     warning(ME.identifier, 'CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline failed: %s', ME.message);
 end
 
-% ---------- Collect PNGs by role (per group) ----------
-SOL_left  = filterExisting({getFieldSafe(voltRasterRes,'pngSolid'),   getFieldSafe(csdSlicesRes,'pngSolid')});
-SOL_mid   = filterExisting({getFieldSafe(evtStacksRes,'pngSolid')});
-SOL_right = filterExisting({getFieldSafe(csdRasterRes,'pngSolid'),    getFieldSafe(csdTimeAvgRes,'pngSolid')});
-
-SPU_left  = filterExisting({getFieldSafe(voltRasterRes,'pngSputter'), getFieldSafe(csdSlicesRes,'pngSputter')});
-SPU_mid   = filterExisting({getFieldSafe(evtStacksRes,'pngSputter')});
-SPU_right = filterExisting({getFieldSafe(csdRasterRes,'pngSputter'),  getFieldSafe(csdTimeAvgRes,'pngSputter')});
-
-% Verbose logging of what we found
-logColumn('SOLID / LEFT',  SOL_left);
-logColumn('SOLID / MID',   SOL_mid);
-logColumn('SOLID / RIGHT', SOL_right);
-logColumn('SPUTTER / LEFT',  SPU_left);
-logColumn('SPUTTER / MID',   SPU_mid);
-logColumn('SPUTTER / RIGHT', SPU_right);
-
-% ---------- Build compact masters (3 columns) ----------
-builtSOL = false; builtSPU = false;
+% ---------- Build SOLID triptych ----------
 try
-    if ~isempty(SOL_left) || ~isempty(SOL_mid) || ~isempty(SOL_right)
-        makeThreeColPanelHiRes(SOL_left, SOL_mid, SOL_right, masterPngSOLID);
-        fprintf('[OK] Master SOLID compact saved: %s\n', masterPngSOLID);
-        builtSOL = true;
+    colLeft_SOL = stackVerticalHiRes({ ...
+        getFileIfExists(getFieldSafe(voltRasterRes,'pngSolid')), ...
+        getFileIfExists(getFieldSafe(csdSlicesRes,'pngSolid'))}, 6);
+    colCtr_SOL  = getFileIfExists(getFieldSafe(evtStacksRes,'pngSolid'));
+    colRight_SOL= stackVerticalHiRes({ ...
+        getFileIfExists(getFieldSafe(csdRasterRes,'pngSolid')), ...
+        getFileIfExists(getFieldSafe(csdTimeAvgRes,'pngSolid'))}, 6);
+
+    cols_SOL = filterNonEmpty({colLeft_SOL, colCtr_SOL, colRight_SOL});
+    if isempty(cols_SOL)
+        warning('Pipeline:NoSolidPNGs', 'No SOLID images found; SOLID compact montage not created.');
     else
-        warning('Pipeline:NoSolidPNGs', 'No SOLID PNGs found; SOLID master not created.');
+        composeColumnsHiRes(cols_SOL, triptychSOLID, 10);
+        fprintf('Master SOLID compact montage saved: %s\n', triptychSOLID);
     end
 catch ME
-    warning(ME.identifier, 'Failed to build SOLID compact: %s', ME.message);
+    warning(ME.identifier, 'Failed to build SOLID compact montage: %s', ME.message);
 end
 
+% ---------- Build SPUTTER triptych ----------
 try
-    if ~isempty(SPU_left) || ~isempty(SPU_mid) || ~isempty(SPU_right)
-        makeThreeColPanelHiRes(SPU_left, SPU_mid, SPU_right, masterPngSPUTTER);
-        fprintf('[OK] Master SPUTTER compact saved: %s\n', masterPngSPUTTER);
-        builtSPU = true;
+    colLeft_SPU = stackVerticalHiRes({ ...
+        getFileIfExists(getFieldSafe(voltRasterRes,'pngSputter')), ...
+        getFileIfExists(getFieldSafe(csdSlicesRes,'pngSputter'))}, 6);
+    colCtr_SPU  = getFileIfExists(getFieldSafe(evtStacksRes,'pngSputter'));
+    colRight_SPU= stackVerticalHiRes({ ...
+        getFileIfExists(getFieldSafe(csdRasterRes,'pngSputter')), ...
+        getFileIfExists(getFieldSafe(csdTimeAvgRes,'pngSputter'))}, 6);
+
+    cols_SPU = filterNonEmpty({colLeft_SPU, colCtr_SPU, colRight_SPU});
+    if isempty(cols_SPU)
+        warning('Pipeline:NoSputterPNGs', 'No SPUTTER images found; SPUTTER compact montage not created.');
     else
-        warning('Pipeline:NoSputterPNGs', 'No SPUTTER PNGs found; SPUTTER master not created.');
+        composeColumnsHiRes(cols_SPU, triptychSPUTTER, 10);
+        fprintf('Master SPUTTER compact montage saved: %s\n', triptychSPUTTER);
     end
 catch ME
-    warning(ME.identifier, 'Failed to build SPUTTER compact: %s', ME.message);
+    warning(ME.identifier, 'Failed to build SPUTTER compact montage: %s', ME.message);
 end
 
 % ---------- Merge available stats into a single CSV ----------
@@ -121,45 +118,13 @@ try
         T = table(string(datetime('now')), "EMPTY", 'VariableNames', {'GeneratedAt','Note'});
     end
     writetable(T, masterCSV);
-    fprintf('[OK] Master stats CSV: %s\n', masterCSV);
+    fprintf('Master stats CSV: %s\n', masterCSV);
 catch ME
     warning(ME.identifier, 'Failed writing master stats CSV: %s', ME.message);
 end
-
-if ~builtSOL || ~builtSPU
-    fprintf('NOTE: You can still find individual PNGs in their output folders.\n');
 end
 
-fprintf('=== Pipeline_Main done ===\n\n');
-end
-
-% ================= helpers =================
-
-function logColumn(label, files)
-fprintf('> Using %s (%d):\n', label, numel(files));
-if isempty(files)
-    fprintf('   (none)\n');
-else
-    for i = 1:numel(files)
-        try
-            info = imfinfo(files{i});
-            fprintf('   %02d: %s  [%dx%d]\n', i, files{i}, info.Width, info.Height);
-        catch
-            fprintf('   %02d: %s  [could not read size]\n', i, files{i});
-        end
-    end
-end
-end
-
-function cellOut = filterExisting(cellIn)
-cellOut = {};
-for i = 1:numel(cellIn)
-    p = string(cellIn{i});
-    if strlength(p) > 0 && isfile(p)
-        cellOut{end+1} = char(p); %#ok<AGROW>
-    end
-end
-end
+% ================= helpers (I/O-safe, native-res composition) ================
 
 function v = getFieldSafe(S, fieldName)
 if ~(isstruct(S) && isfield(S, fieldName))
@@ -167,6 +132,125 @@ if ~(isstruct(S) && isfield(S, fieldName))
 else
     v = string(S.(fieldName));
 end
+end
+
+function p = getFileIfExists(s)
+p = "";
+if strlength(s) > 0
+    c = char(s);
+    if isfile(c), p = c; end
+end
+end
+
+function C = filterNonEmpty(Cin)
+C = {};
+for i = 1:numel(Cin)
+    if ~isempty(Cin{i})
+        C{end+1} = Cin{i}; %#ok<AGROW>
+    end
+end
+end
+
+function outPath = stackVerticalHiRes(pngList, sep)
+% Returns a path to a temp PNG that is a vertical stack of the inputs at native res.
+% If zero or one valid png in list, returns [] or that single path as-is.
+
+pngList = pngList(~cellfun(@isempty, pngList));
+if isempty(pngList)
+    outPath = [];
+    return;
+elseif numel(pngList) == 1
+    outPath = pngList{1};
+    return;
+end
+
+% read
+imgs = cell(numel(pngList),1);
+widths = zeros(numel(pngList),1);
+heights= zeros(numel(pngList),1);
+for i = 1:numel(pngList)
+    imgs{i} = imread(pngList{i});
+    [h,w,~] = size(imgs{i});
+    widths(i)  = w;
+    heights(i) = h;
+end
+Wmax = max(widths);
+
+% prep white canvas
+cls = class(imgs{1});
+switch cls
+    case {'uint8'},  whiteVal = uint8(255);
+    case {'uint16'}, whiteVal = uint16(65535);
+    case {'double'}, whiteVal = 1;
+    case {'single'}, whiteVal = single(1);
+    otherwise, error('Unsupported image class: %s', cls);
+end
+totalH = sum(heights) + sep*(numel(imgs)-1);
+if size(imgs{1},3) == 1
+    out = repmat(whiteVal, [totalH, Wmax, 1]);
+else
+    out = repmat(reshape(whiteVal,1,1,[]), [totalH, Wmax, size(imgs{1},3)]);
+end
+
+% paste
+y = 1;
+for i = 1:numel(imgs)
+    I = imgs{i}; [h,w,c] = size(I);
+    out(y:y+h-1, 1:w, 1:c) = I;
+    y = y + h;
+    if i < numel(imgs), out(y:y+sep-1, :, :) = whiteVal; y = y + sep; end
+end
+
+% save to a temp in master output dir sibling
+tmpDir = tempname; mkdir(tmpDir);
+outPath = fullfile(tmpDir, sprintf('colV_%s.png', char(java.util.UUID.randomUUID)));
+imwrite(out, outPath);
+end
+
+function composeColumnsHiRes(columnImgs, outPath, colSep)
+% columnImgs: cell array of image file paths (each path is either a single plot
+% or a pre-composed vertical stack). Compose LEFT→RIGHT at native res, no resampling.
+
+assert(~isempty(columnImgs), 'composeColumnsHiRes: no columns to compose.');
+
+% read columns
+cols = cell(numel(columnImgs),1);
+cw   = zeros(numel(columnImgs),1);
+ch   = zeros(numel(columnImgs),1);
+for i = 1:numel(columnImgs)
+    cols{i} = imread(columnImgs{i});
+    [h,w,~] = size(cols{i});
+    cw(i) = w; ch(i) = h;
+end
+
+Hmax = max(ch);
+Wsum = sum(cw) + colSep*(numel(cols)-1);
+
+% white canvas of proper class
+cls = class(cols{1});
+switch cls
+    case {'uint8'},  whiteVal = uint8(255);
+    case {'uint16'}, whiteVal = uint16(65535);
+    case {'double'}, whiteVal = 1;
+    case {'single'}, whiteVal = single(1);
+    otherwise, error('Unsupported image class: %s', cls);
+end
+if size(cols{1},3) == 1
+    out = repmat(whiteVal, [Hmax, Wsum, 1]);
+else
+    out = repmat(reshape(whiteVal,1,1,[]), [Hmax, Wsum, size(cols{1},3)]);
+end
+
+% paste columns top-aligned
+x = 1;
+for i = 1:numel(cols)
+    I = cols{i}; [h,w,c] = size(I);
+    out(1:h, x:x+w-1, 1:c) = I;
+    x = x + w;
+    if i < numel(cols), out(:, x:x+colSep-1, :) = whiteVal; x = x + colSep; end
+end
+
+imwrite(out, outPath);
 end
 
 function T = tryAddCSV(T, res, tag)
@@ -197,198 +281,7 @@ end
 function T = addMissingVars(T, allVars)
 missing = setdiff(allVars, T.Properties.VariableNames, 'stable');
 for k = 1:numel(missing)
-    T.(missing{k}) = missingDefault();
+    T.(missing{k}) = missing;
 end
 T = T(:, allVars);
-end
-
-function x = missingDefault()
-x = missing;
-end
-
-% ---------- image composition (native res, borders, gutters) ----------
-
-function makeThreeColPanelHiRes(leftPngs, midPngs, rightPngs, outPath)
-% Build three columns at native resolution.
-% Each column stacks its images vertically (with borders) → pad columns to equal
-% height → concat side-by-side. No resampling.
-
-fprintf('Composing 3-column panel → %s\n', outPath);
-
-% Spacing / styles
-colSep    = 12;   % px between columns
-tileSep   = 8;    % px between tiles inside a column
-borderPx  = 2;    % tile border width (px)
-borderRGB = [0 0 0]; % black borders
-padRGB    = 255;  % white padding
-
-% Build raw columns (possibly empty)
-colL = makeColumn(leftPngs, tileSep, borderPx, borderRGB, padRGB);
-colM = makeColumn(midPngs,  tileSep, borderPx, borderRGB, padRGB);
-colR = makeColumn(rightPngs,tileSep, borderPx, borderRGB, padRGB);
-
-% If a column is empty, substitute a 1×1 spacer *now*
-[cls, ch] = pickClassAndCh({colL,colM,colR});
-if isempty(colL), colL = makeSpacer(1,1,cls,ch,padRGB); end
-if isempty(colM), colM = makeSpacer(1,1,cls,ch,padRGB); end
-if isempty(colR), colR = makeSpacer(1,1,cls,ch,padRGB); end
-
-% Harmonize class/ch across all columns
-colL = castToSimple(colL, cls, ch, padRGB);
-colM = castToSimple(colM, cls, ch, padRGB);
-colR = castToSimple(colR, cls, ch, padRGB);
-
-% Target height from actual (post-substitution) columns
-H = max([size(colL,1), size(colM,1), size(colR,1)]);
-
-% Pad each column to exactly H
-colL = padToHeight(colL, H, cls, ch, padRGB);
-colM = padToHeight(colM, H, cls, ch, padRGB);
-colR = padToHeight(colR, H, cls, ch, padRGB);
-
-% Final widths
-Wl = size(colL,2); Wm = size(colM,2); Wr = size(colR,2);
-
-% Final canvas
-W = Wl + Wm + Wr + colSep*2;
-out = makeSpacer(H, W, cls, ch, padRGB);
-
-% Blit columns using their actual widths
-x = 1;
-out(:, x:(x+Wl-1), :) = colL; x = x + Wl + colSep;
-out(:, x:(x+Wm-1), :) = colM; x = x + Wm + colSep;
-out(:, x:(x+Wr-1), :) = colR;
-
-imwrite(out, outPath);
-end
-
-function C = makeColumn(pngList, sep, borderPx, borderRGB, padRGB)
-% Stack images vertically with borders at native resolution. Returns [] if no images.
-C = [];
-if isempty(pngList), return; end
-
-imgs = cell(0,1);
-w = []; h = [];
-
-for i = 1:numel(pngList)
-    p = pngList{i};
-    if ~isfile(p)
-        fprintf('  [skip] not found: %s\n', p);
-        continue;
-    end
-    I = imread(p);
-    I = addBorder(I, borderPx, borderRGB);
-    imgs{end+1} = I; %#ok<AGROW>
-    [hi,wi,~] = size(I);
-    h(end+1) = hi; %#ok<AGROW>
-    w(end+1) = wi; %#ok<AGROW>
-end
-
-if isempty(imgs), return; end
-
-W = max(w);
-H = sum(h) + sep*(numel(imgs)-1);
-
-cls = class(imgs{1});
-ch  = size(imgs{1},3);
-C = makeSpacer(H, W, cls, ch, padRGB);
-
-y = 1;
-for i = 1:numel(imgs)
-    I = imgs{i};
-    [hi,wi,ci] = size(I);
-    C(y:y+hi-1, 1:wi, 1:ci) = I;
-    y = y + hi;
-    if i < numel(imgs), y = y + sep; end
-end
-end
-
-function I2 = addBorder(I, px, rgb)
-if px<=0, I2 = I; return; end
-if size(I,3)==1
-    v = round((0.299*rgb(1)+0.587*rgb(2)+0.114*rgb(3)));
-    v = max(0,min(255,v));
-    switch class(I)
-        case 'uint8',  padVal = uint8(v);
-        case 'uint16', padVal = uint16(round(v*(65535/255)));
-        case 'double', padVal = double(v/255);
-        case 'single', padVal = single(v/255);
-        otherwise,     padVal = uint8(v);
-    end
-    I2 = padarray(I, [px px], padVal, 'both');
-else
-    cls = class(I);
-    I2 = padarray(I, [px px], 0, 'both');
-    switch cls
-        case 'uint8',  col = uint8(reshape(rgb,1,1,3));
-        case 'uint16', col = uint16(reshape(rgb,1,1,3)*(65535/255));
-        case 'double', col = reshape(rgb/255,1,1,3);
-        case 'single', col = single(reshape(rgb/255,1,1,3));
-        otherwise,     col = uint8(reshape(rgb,1,1,3));
-    end
-    I2(1:px,:,:)            = col;
-    I2(end-px+1:end,:,:)    = col;
-    I2(:,1:px,:)            = col;
-    I2(:,end-px+1:end,:,:)  = col;
-end
-end
-
-function S = makeSpacer(H, W, cls, ch, padRGB)
-switch cls
-    case 'uint8',  base = uint8(padRGB);
-    case 'uint16', base = uint16(round(padRGB*(65535/255)));
-    case 'double', base = double(padRGB/255);
-    case 'single', base = single(padRGB/255);
-    otherwise,     base = uint8(padRGB);
-end
-if ch==1
-    S = repmat(base, [H W 1]);
-else
-    S = repmat(reshape(base,1,1,[]), [H W ch]);
-end
-end
-
-function [cls, ch] = pickClassAndCh(cols)
-cls = 'uint8'; ch = 3;
-for i = 1:numel(cols)
-    if ~isempty(cols{i})
-        cls = class(cols{i});
-        if ndims(cols{i})==2, ch = 1; else, ch = size(cols{i},3); end
-        return;
-    end
-end
-end
-
-function A = castToSimple(A, cls, ch, padRGB)
-if isempty(A), return; end
-if ~strcmp(class(A), cls)
-    switch cls
-        case 'uint8',  A = uint8(A);
-        case 'uint16', A = uint16(A);
-        case 'double', A = double(A);
-        case 'single', A = single(A);
-        otherwise
-    end
-end
-if size(A,3) ~= ch
-    if ch==3 && size(A,3)==1
-        A = repmat(A, [1 1 3]);
-    elseif ch==1 && size(A,3)==3
-        if isa(A,'uint8') || isa(A,'uint16')
-            A = mean(A,3,'native');
-        else
-            A = mean(A,3);
-        end
-    else
-        A = makeSpacer(size(A,1), size(A,2), cls, ch, padRGB);
-    end
-end
-end
-
-function B = padToHeight(A, H, cls, ch, padRGB)
-if isempty(A), B = A; return; end
-[h,w,~] = size(A);
-if h==H, B = A; return; end
-pad = makeSpacer(H-h, w, cls, ch, padRGB);
-B = [A; pad];
 end
