@@ -1,13 +1,16 @@
 function Pipeline_Main(inputFolder, dataMatPath, varargin)
-% Pipeline_Main — orchestrates sub-pipelines and builds TWO compact master
-% panels (SOLID, SPUTTER) + a merged stats CSV.
+% Pipeline_Main — orchestrates sub-pipelines and builds TWO compact masters
+% (SOLID, SPUTTER) + merged stats CSV. Lots of verbose logging so it's clear
+% what's happening if something is missing.
 %
-% Columns (per group):
+% Column layout per group:
 %   LEFT  : VoltageRaster_EventsAvg + CSD_CenterSlices_Waveform_AvgGroups
 %   MIDDLE: EventStacks_ampWidth_Avg (tall)
 %   RIGHT : CSDRaster_Avg + CSD_TimeAvgSlices_Waveforms_AvgGroups
 %
-% Robust to missing images/CSVs. No resampling; everything at native resolution.
+% All images are composed at native resolution. No resampling.
+
+fprintf('\n=== Pipeline_Main starting ===\n');
 
 % ---------- Output hub ----------
 masterOutDir = fullfile(inputFolder, 'Pipeline Output');
@@ -72,12 +75,20 @@ SPU_left  = filterExisting({getFieldSafe(voltRasterRes,'pngSputter'), getFieldSa
 SPU_mid   = filterExisting({getFieldSafe(evtStacksRes,'pngSputter')});
 SPU_right = filterExisting({getFieldSafe(csdRasterRes,'pngSputter'), getFieldSafe(csdTimeAvgRes,'pngSputter')});
 
+% Verbose logging of what we found
+logColumn('SOLID / LEFT',  SOL_left);
+logColumn('SOLID / MID',   SOL_mid);
+logColumn('SOLID / RIGHT', SOL_right);
+logColumn('SPUTTER / LEFT',  SPU_left);
+logColumn('SPUTTER / MID',   SPU_mid);
+logColumn('SPUTTER / RIGHT', SPU_right);
+
 % ---------- Build compact masters (3 columns) ----------
 builtSOL = false; builtSPU = false;
 try
     if ~isempty(SOL_left) || ~isempty(SOL_mid) || ~isempty(SOL_right)
         makeThreeColPanelHiRes(SOL_left, SOL_mid, SOL_right, masterPngSOLID);
-        fprintf('Master SOLID compact saved: %s\n', masterPngSOLID);
+        fprintf('[OK] Master SOLID compact saved: %s\n', masterPngSOLID);
         builtSOL = true;
     else
         warning('Pipeline:NoSolidPNGs', 'No SOLID PNGs found; SOLID master not created.');
@@ -89,7 +100,7 @@ end
 try
     if ~isempty(SPU_left) || ~isempty(SPU_mid) || ~isempty(SPU_right)
         makeThreeColPanelHiRes(SPU_left, SPU_mid, SPU_right, masterPngSPUTTER);
-        fprintf('Master SPUTTER compact saved: %s\n', masterPngSPUTTER);
+        fprintf('[OK] Master SPUTTER compact saved: %s\n', masterPngSPUTTER);
         builtSPU = true;
     else
         warning('Pipeline:NoSputterPNGs', 'No SPUTTER PNGs found; SPUTTER master not created.');
@@ -111,7 +122,7 @@ try
         T = table(string(datetime('now')), "EMPTY", 'VariableNames', {'GeneratedAt','Note'});
     end
     writetable(T, masterCSV);
-    fprintf('Master stats CSV: %s\n', masterCSV);
+    fprintf('[OK] Master stats CSV: %s\n', masterCSV);
 catch ME
     warning(ME.identifier, 'Failed writing master stats CSV: %s', ME.message);
 end
@@ -119,9 +130,27 @@ end
 if ~builtSOL || ~builtSPU
     fprintf('NOTE: You can still find individual PNGs in their output folders.\n');
 end
+
+fprintf('=== Pipeline_Main done ===\n\n');
 end
 
 % ================= helpers =================
+
+function logColumn(label, files)
+fprintf('> Using %s (%d):\n', label, numel(files));
+if isempty(files)
+    fprintf('   (none)\n');
+else
+    for i = 1:numel(files)
+        try
+            info = imfinfo(files{i});
+            fprintf('   %02d: %s  [%dx%d]\n', i, files{i}, info.Width, info.Height);
+        catch
+            fprintf('   %02d: %s  [could not read size]\n', i, files{i});
+        end
+    end
+end
+end
 
 function cellOut = filterExisting(cellIn)
 cellOut = {};
@@ -182,7 +211,10 @@ end
 
 function makeThreeColPanelHiRes(leftPngs, midPngs, rightPngs, outPath)
 % Build three columns at native resolution.
-% Each column stacks its images vertically (with borders) → pad columns to equal height → concat side-by-side.
+% Each column stacks its images vertically (with borders) → pad columns to equal
+% height → concat side-by-side. No resampling.
+
+fprintf('Composing 3-column panel → %s\n', outPath);
 
 % Column configs
 colSep    = 12;   % px between columns
@@ -200,11 +232,11 @@ if isempty(colL) && isempty(colM) && isempty(colR)
     error('No images provided to compose.');
 end
 
-% Standardize class/planes
+% Standardize class/planes using the first non-empty column
 [cls, ch] = pickClassAndCh({colL,colM,colR});
-colL = castTo(colL, cls, ch, padRGB);
-colM = castTo(colM, cls, ch, padRGB);
-colR = castTo(colR, cls, ch, padRGB);
+colL = castToSimple(colL, cls, ch, padRGB);
+colM = castToSimple(colM, cls, ch, padRGB);
+colR = castToSimple(colR, cls, ch, padRGB);
 
 % Compute target height
 H = max([sizeSafe(colL,1), sizeSafe(colM,1), sizeSafe(colR,1)]);
@@ -215,7 +247,7 @@ colL = padToHeight(colL, H, cls, ch, padRGB);
 colM = padToHeight(colM, H, cls, ch, padRGB);
 colR = padToHeight(colR, H, cls, ch, padRGB);
 
-% If a column is empty, replace with spacer (narrow)
+% If a column is empty, replace with 1-px spacer
 if isempty(colL), colL = makeSpacer(H, 1, cls, ch, padRGB); Wl = 1; end
 if isempty(colM), colM = makeSpacer(H, 1, cls, ch, padRGB); Wm = 1; end
 if isempty(colR), colR = makeSpacer(H, 1, cls, ch, padRGB); Wr = 1; end
@@ -237,12 +269,17 @@ function C = makeColumn(pngList, sep, borderPx, borderRGB, padRGB)
 % Stack images vertically with borders at native resolution. Returns [] if no images.
 C = [];
 if isempty(pngList), return; end
+
 imgs = cell(0,1);
 w = []; h = [];
 
-% read & border each
 for i = 1:numel(pngList)
-    I = imread(pngList{i});
+    p = pngList{i};
+    if ~isfile(p)
+        fprintf('  [skip] not found: %s\n', p);
+        continue;
+    end
+    I = imread(p);
     I = addBorder(I, borderPx, borderRGB);
     imgs{end+1} = I; %#ok<AGROW>
     [hi,wi,~] = size(I);
@@ -250,15 +287,21 @@ for i = 1:numel(pngList)
     w(end+1) = wi; %#ok<AGROW>
 end
 
+if isempty(imgs), return; end
+
 W = max(w);
 H = sum(h) + sep*(numel(imgs)-1);
-C = makeSpacer(H, W, class(imgs{1}), size(imgs{1},3), padRGB);
+
+% canvas class/ch based on first tile
+cls = class(imgs{1});
+ch  = size(imgs{1},3);
+C = makeSpacer(H, W, cls, ch, padRGB);
 
 y = 1;
 for i = 1:numel(imgs)
     I = imgs{i};
     [hi,wi,ch] = size(I);
-    C(y:y+hi-1, 1:wi, 1:ch) = I; %#ok<SPRIX>
+    C(y:y+hi-1, 1:wi, 1:ch) = I;
     y = y + hi;
     if i < numel(imgs)
         y = y + sep;
@@ -269,15 +312,21 @@ end
 function I2 = addBorder(I, px, rgb)
 if px<=0, I2 = I; return; end
 if size(I,3)==1
-    % grayscale → use mean of rgb for border
-    v = uint8(round(mean(rgb)*255/255));
-    if isa(I,'uint16'), v = uint16(65535*(mean(rgb)/255)); end
-    if isa(I,'double'), v = mean(rgb)/255; end
-    if isa(I,'single'), v = single(mean(rgb)/255); end
-    I2 = padarray(I, [px px], v, 'both');
+    % grayscale border value matching rgb luminance approx
+    v = round((0.299*rgb(1)+0.587*rgb(2)+0.114*rgb(3)));
+    v = max(0,min(255,v));
+    switch class(I)
+        case 'uint8',  padVal = uint8(v);
+        case 'uint16', padVal = uint16(round(v*(65535/255)));
+        case 'double', padVal = double(v/255);
+        case 'single', padVal = single(v/255);
+        otherwise,     padVal = uint8(v);
+    end
+    I2 = padarray(I, [px px], padVal, 'both');
 else
-    % RGB
+    % RGB: pad with zeros then paint border bands to color
     cls = class(I);
+    I2 = padarray(I, [px px], 0, 'both');
     switch cls
         case 'uint8',  col = uint8(reshape(rgb,1,1,3));
         case 'uint16', col = uint16(reshape(rgb,1,1,3)*(65535/255));
@@ -285,8 +334,6 @@ else
         case 'single', col = single(reshape(rgb/255,1,1,3));
         otherwise,     col = uint8(reshape(rgb,1,1,3));
     end
-    I2 = padarray(I, [px px], 'both');
-    % fill border
     I2(1:px,:,:)            = col;
     I2(end-px+1:end,:,:)    = col;
     I2(:,1:px,:)            = col;
@@ -310,7 +357,6 @@ end
 end
 
 function [cls, ch] = pickClassAndCh(cols)
-% choose first non-empty column's class and channels
 cls = 'uint8'; ch = 3;
 for i = 1:numel(cols)
     if ~isempty(cols{i})
@@ -321,29 +367,34 @@ for i = 1:numel(cols)
 end
 end
 
-function A = castTo(A, cls, ch, padRGB)
+function A = castToSimple(A, cls, ch, padRGB)
 if isempty(A), return; end
+% cast class without IPT functions
 if ~strcmp(class(A), cls)
     switch cls
-        case 'uint8',  A = im2uint8(A);
-        case 'uint16', A = im2uint16(A);
-        case 'double', A = im2double(A);
-        case 'single', A = im2single(A);
+        case 'uint8',  A = uint8(A);
+        case 'uint16', A = uint16(A);
+        case 'double', A = double(A);
+        case 'single', A = single(A);
         otherwise
     end
 end
+% adjust channels (avoid rgb2gray dependency)
 if size(A,3) ~= ch
-    if ch==3
+    if ch==3 && size(A,3)==1
         A = repmat(A, [1 1 3]);
+    elseif ch==1 && size(A,3)==3
+        % average to gray in native class
+        if isa(A,'uint8') || isa(A,'uint16')
+            A = mean(A,3,'native');
+        else
+            A = mean(A,3);
+        end
     else
-        A = rgb2grayIfNeeded(A);
+        % unexpected — pad to desired channels
+        A = makeSpacer(size(A,1), size(A,2), cls, ch, padRGB);
     end
 end
-end
-
-function G = rgb2grayIfNeeded(A)
-if size(A,3)==1, G = A; return; end
-G = rgb2gray(A);
 end
 
 function h = sizeSafe(A, dim)
