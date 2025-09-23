@@ -67,13 +67,13 @@ catch ME
 end
 
 % ---------- Collect PNGs by role (per group) ----------
-SOL_left  = filterExisting({getFieldSafe(voltRasterRes,'pngSolid'), getFieldSafe(csdSlicesRes,'pngSolid')});
+SOL_left  = filterExisting({getFieldSafe(voltRasterRes,'pngSolid'),   getFieldSafe(csdSlicesRes,'pngSolid')});
 SOL_mid   = filterExisting({getFieldSafe(evtStacksRes,'pngSolid')});
-SOL_right = filterExisting({getFieldSafe(csdRasterRes,'pngSolid'), getFieldSafe(csdTimeAvgRes,'pngSolid')});
+SOL_right = filterExisting({getFieldSafe(csdRasterRes,'pngSolid'),    getFieldSafe(csdTimeAvgRes,'pngSolid')});
 
 SPU_left  = filterExisting({getFieldSafe(voltRasterRes,'pngSputter'), getFieldSafe(csdSlicesRes,'pngSputter')});
 SPU_mid   = filterExisting({getFieldSafe(evtStacksRes,'pngSputter')});
-SPU_right = filterExisting({getFieldSafe(csdRasterRes,'pngSputter'), getFieldSafe(csdTimeAvgRes,'pngSputter')});
+SPU_right = filterExisting({getFieldSafe(csdRasterRes,'pngSputter'),  getFieldSafe(csdTimeAvgRes,'pngSputter')});
 
 % Verbose logging of what we found
 logColumn('SOLID / LEFT',  SOL_left);
@@ -238,25 +238,29 @@ colL = castToSimple(colL, cls, ch, padRGB);
 colM = castToSimple(colM, cls, ch, padRGB);
 colR = castToSimple(colR, cls, ch, padRGB);
 
-% Compute target height
+% Compute target height from actual column arrays
 H = max([sizeSafe(colL,1), sizeSafe(colM,1), sizeSafe(colR,1)]);
-Wl = sizeSafe(colL,2); Wm = sizeSafe(colM,2); Wr = sizeSafe(colR,2);
 
-% Pad columns to same height
+% Pad columns to same height (if non-empty)
 colL = padToHeight(colL, H, cls, ch, padRGB);
 colM = padToHeight(colM, H, cls, ch, padRGB);
 colR = padToHeight(colR, H, cls, ch, padRGB);
 
-% If a column is empty, replace with 1-px spacer
-if isempty(colL), colL = makeSpacer(H, 1, cls, ch, padRGB); Wl = 1; end
-if isempty(colM), colM = makeSpacer(H, 1, cls, ch, padRGB); Wm = 1; end
-if isempty(colR), colR = makeSpacer(H, 1, cls, ch, padRGB); Wr = 1; end
+% If a column is empty, replace with 1-px spacer NOW, then recompute widths
+if isempty(colL), colL = makeSpacer(H, 1, cls, ch, padRGB); end
+if isempty(colM), colM = makeSpacer(H, 1, cls, ch, padRGB); end
+if isempty(colR), colR = makeSpacer(H, 1, cls, ch, padRGB); end
+
+% >>> FIX: recompute widths AFTER spacer substitution <<<
+Wl = size(colL,2);
+Wm = size(colM,2);
+Wr = size(colR,2);
 
 % Final canvas
 W = Wl + Wm + Wr + colSep*2;
 out = makeSpacer(H, W, cls, ch, padRGB);
 
-% Blit columns
+% Blit columns with fresh widths
 x = 1;
 out(:, x:x+Wl-1, :) = colL; x = x + Wl + colSep;
 out(:, x:x+Wm-1, :) = colM; x = x + Wm + colSep;
@@ -312,7 +316,6 @@ end
 function I2 = addBorder(I, px, rgb)
 if px<=0, I2 = I; return; end
 if size(I,3)==1
-    % grayscale border value matching rgb luminance approx
     v = round((0.299*rgb(1)+0.587*rgb(2)+0.114*rgb(3)));
     v = max(0,min(255,v));
     switch class(I)
@@ -324,7 +327,6 @@ if size(I,3)==1
     end
     I2 = padarray(I, [px px], padVal, 'both');
 else
-    % RGB: pad with zeros then paint border bands to color
     cls = class(I);
     I2 = padarray(I, [px px], 0, 'both');
     switch cls
@@ -369,7 +371,6 @@ end
 
 function A = castToSimple(A, cls, ch, padRGB)
 if isempty(A), return; end
-% cast class without IPT functions
 if ~strcmp(class(A), cls)
     switch cls
         case 'uint8',  A = uint8(A);
@@ -379,19 +380,16 @@ if ~strcmp(class(A), cls)
         otherwise
     end
 end
-% adjust channels (avoid rgb2gray dependency)
 if size(A,3) ~= ch
     if ch==3 && size(A,3)==1
         A = repmat(A, [1 1 3]);
     elseif ch==1 && size(A,3)==3
-        % average to gray in native class
         if isa(A,'uint8') || isa(A,'uint16')
             A = mean(A,3,'native');
         else
             A = mean(A,3);
         end
     else
-        % unexpected — pad to desired channels
         A = makeSpacer(size(A,1), size(A,2), cls, ch, padRGB);
     end
 end
