@@ -35,15 +35,15 @@ p.addParameter('scaleToMicroV', 1, @(x)isnumeric(x) && all(isfinite(x)) && all(x
 p.addParameter('winHalfWidthMs',    10e-3, @(x)isfinite(x)&&x>0);   % ±10 ms display
 p.addParameter('anchorHalfWidthMs',  5e-3, @(x)isfinite(x)&&x>0);   % ±5 ms anchor search
 
-% Spectrogram params
-p.addParameter('specWinMs',    1e-3,  @(x)isfinite(x)&&x>0);        % STFT window length (default 1 ms)
-p.addParameter('specOverlap',  0.50,  @(x)isfinite(x)&&x>=0&&x<1);  % fraction overlap
-p.addParameter('nfft',         [],    @(x) isempty(x) || (isscalar(x)&&x>0)); % default auto pow2
-p.addParameter('fMaxHz',       3000,  @(x)isfinite(x)&&x>0);        % y-axis upper limit
+% Spectrogram params (UPDATED DEFAULTS)
+p.addParameter('specWinMs',    0.1e-3,  @(x)isfinite(x)&&x>0);      % <-- default 0.1 ms
+p.addParameter('specOverlap',  0.50,    @(x)isfinite(x)&&x>=0&&x<1);% fraction overlap
+p.addParameter('nfft',         [],      @(x) isempty(x) || (isscalar(x)&&x>0));
+p.addParameter('fMaxHz',       2000,    @(x)isfinite(x)&&x>0);      % <-- default 2000 Hz
 
 % Color scaling (per-event)
 p.addParameter('yRobustPct',   99.5,  @(x) isfinite(x) && x>0 && x<100);
-p.addParameter('climPadFrac',  0.12,  @(x) isfinite(x) && x>=0 && x<=0.5); %#ok<NASGU> (kept for API parity)
+p.addParameter('climPadFrac',  0.12,  @(x) isfinite(x) && x>=0 && x<=0.5); %#ok<NASGU>
 
 % Caps
 p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
@@ -153,15 +153,15 @@ if ~isempty(maxEventsPer)
 end
 
 % ---------------- Spectrogram params (samples) ----------------
-specWinSamp      = max(4, round(specWinMs * sfx));           % at least a few samples
+specWinSamp      = max(8, round(specWinMs * sfx));                      % enforce small minimum length
 specOverlapSamp  = max(0, min(specWinSamp-1, round(specOverlap * specWinSamp)));
 if isempty(nfftOpt)
-    nfft = 2^nextpow2(specWinSamp);
+    nfft = max(32, 2^nextpow2(specWinSamp));                             % reasonable lower bound
 else
     nfft = nfftOpt;
 end
 
-fprintf(['Spectrogram params: win=%d samp (%.2f ms) | overlap=%d samp (%.0f%%) | nfft=%d | fMax=%.0f Hz | ' ...
+fprintf(['Spectrogram params: win=%d samp (%.3f ms) | overlap=%d samp (%.0f%%) | nfft=%d | fMax=%.0f Hz | ' ...
          'display window ±%.1f ms | anchor search ±%.1f ms\n'], ...
         specWinSamp, 1e3*specWinSamp/sfx, specOverlapSamp, 100*specOverlapSamp/specWinSamp, ...
         nfft, fMaxHz, 1e3*HWwin/sfx, 1e3*HWanchor/sfx);
@@ -184,12 +184,16 @@ end
 
 function renderGroup(evtList, outDir, tag, mf, sfx, chList, nCh, kept_channels, ...
                      onSamp, offSamp, NrowsXL, nSamp, scaleVec, HWanchor, HWwin, ...
-                     specWinSamp, specOverlapSamp, nfft, fMaxHz, yRobustPct)
+                     specWinSamp, specOverlapSamp, nfft, fMaxHzReq, yRobustPct)
 
 if isempty(evtList)
     fprintf('%s: no events to render.\n', tag);
     return;
 end
+
+% clamp fMax to Nyquist
+fNyq = sfx/2;
+fMaxHzReq = min(fMaxHzReq, fNyq);
 
 for ii = 1:numel(evtList)
     e = evtList(ii);
@@ -230,10 +234,12 @@ for ii = 1:numel(evtList)
         [S, F, T] = spectrogram(y, specWinSamp, specOverlapSamp, nfft, sfx);
         P = 10*log10(abs(S).^2 + eps);
 
-        idxF = F <= fMaxHz;
+        % clamp to requested fMax (already <= Nyquist)
+        idxF = F <= fMaxHzReq & F >= 0;
+        if ~any(idxF), idxF = true(size(F)); end
         F = F(idxF); P = P(idxF, :);
 
-        % Time axis in ms relative to anchor: T starts at 0 at segment start
+        % Time axis in ms relative to anchor: T is center-of-window from signal start
         Tms = (T - (HWwin/sfx)) * 1e3;
 
         S_store{k} = P;
@@ -250,13 +256,15 @@ for ii = 1:numel(evtList)
         continue;
     end
     pUpper = prctile(allPow, yRobustPct);
-    pLower = max(min(allPow), pUpper - 40);  % 40 dB dynamic below the robust top
+    pLower = max(min(allPow), pUpper - 40);  % 40 dB dynamic range below robust top
 
     % ---- Figure: stacked rasters (channel 1 at top) ----
     perRowPx = 105; basePx = 230; maxPx = 5400;
     figH = min(maxPx, basePx + perRowPx * nCh);
     f = figure('Color','w','Position',[60 60 1100 figH],'Visible','off');
     tl = tiledlayout(f, nCh, 1, 'Padding','compact','TileSpacing','compact');
+
+    ymaxActual = 0; % track actual F max drawn to keep ylim valid
 
     for k = 1:nCh
         ax = nexttile(tl); hold(ax,'on'); box(ax,'on');
@@ -275,6 +283,8 @@ for ii = 1:numel(evtList)
         caxis(ax, [pLower pUpper]);
         colormap(ax, parula);
 
+        ymaxActual = max(ymaxActual, max(F));
+
         % Axes formatting
         if k < nCh
             set(ax,'XTickLabel',[]);
@@ -288,13 +298,20 @@ for ii = 1:numel(evtList)
             ttl = sprintf('row %d (CSC%d)', chList(k), kept_channels(chList(k)));
         end
         title(ax, ttl, 'FontSize', 9, 'FontWeight','normal');
-        ylim(ax, [0, fMaxHz]);
+    end
+
+    % Now set a consistent Y limit across tiles: [0, min(requested, actual, Nyquist)]
+    yUpper = min([fMaxHzReq, ymaxActual, sfx/2]);
+    if ~isfinite(yUpper) || yUpper <= 0, yUpper = sfx/2; end
+    axAll = findall(f, 'Type','axes');
+    for ax = axAll'
+        ylim(ax, [0, yUpper]);
     end
 
     sg = sprintf(['%s  |  Evt %d  |  anchor: first-ch max (±%.1f ms)  |  window: \\pm%.1f ms  |  ' ...
-                  'STFT win=%.2f ms, overlap=%.0f%%, nfft=%d, fMax=%.0f Hz  |  CLim=[%.1f, %.1f] dB'], ...
+                  'STFT win=%.3f ms, overlap=%.0f%%, nfft=%d, fMax=%.0f Hz  |  CLim=[%.1f, %.1f] dB'], ...
                   tag, e, 1e3*HWanchor/sfx, 1e3*HWwin/sfx, ...
-                  1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, fMaxHz, pLower, pUpper);
+                  1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, yUpper, pLower, pUpper);
     sgtitle(tl, sg, 'FontSize', 10, 'FontWeight', 'bold');
 
     % Attach a single colorbar (to last axes is fine/portable)
