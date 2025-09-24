@@ -1,83 +1,76 @@
-function SpectralRaster_Events(inputFolder, dataMatPath, varargin)
-% SpectralRaster_Events
-% For each event, create a stacked spectrogram figure: one axes per channel.
-% X-axis = time (ms), Y-axis = frequency (Hz), color = power (linear or dB).
+function SpectrogramRaster_Events(inputFolder, dataMatPath, varargin)
+% SpectrogramRaster_Events
+% Build a spectrogram raster per event (SOLID/SPUTTER), aligned by first
+% channel positive peak near the event midpoint. Saves one PNG per event.
 %
-% OUTPUT FOLDERS (created if missing)
-%   <inputFolder>/Spectral Raster Output/Solid
-%   <inputFolder>/Spectral Raster Output/Sputter
+% AXES:
+%   x: time (ms, relative to anchor)
+%   y: frequency (Hz)
+%   color: power (dB, 10*log10(|S|.^2))
 %
-% Event IDs are inferred from existing PNG names in:
-%   <inputFolder>/Solid and <inputFolder>/Sputter
-% (Pattern 'Evt(\d+)' same as VoltageRaster_Events.)
+% FOLDERS:
+%   <inputFolder>/Spectral Raster Output/Solid/  EvtNNN_SPECT.png
+%   <inputFolder>/Spectral Raster Output/Sputter/EvtNNN_SPECT.png
 %
-% Default anchor: first channel's POSITIVE PEAK within ±5 ms around midpoint.
-% Default time window for the spectrogram stack: ±10 ms.
-% Global color limits are computed across ALL events (both groups) for comparability.
+% REQUIRED DATA MAT FIELDS:
+%   d   [nRows x nSamp]  (signal; assumed µV unless scaled)
+%   sfx (scalar, Hz)
+%   kept_channels (optional)
 %
-% REQUIRED data MAT fields:
-%   d [nRows x nSamp], sfx (Hz), kept_channels (optional)
+% REQUIRED LAYOUT IN inputFolder:
+%   subfolders "Solid" and "Sputter" with PNGs named like "...Evt###....png"
+%   and an Excel (*.xlsx) file with event on/off (samples or seconds)
 %
 % ---------------- Args ----------------
 p = inputParser;
 p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 
-% same inputs as your voltage raster
+% Excel + channels + scaling
 p.addParameter('excelPath',"", @(s)ischar(s)||isstring(s));
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
 p.addParameter('scaleToMicroV', 1, @(x)isnumeric(x) && all(isfinite(x)) && all(x>0));
 
-p.addParameter('anchorMode','firstChMax', @(s) any(strcmpi(s,{'firstChMax','midpoint'})));
-p.addParameter('anchorHalfWidthMs', 5e-3,  @(x)isfinite(x)&&x>0);
+% Alignment and window
+p.addParameter('winHalfWidthMs',    10e-3, @(x)isfinite(x)&&x>0);   % ±10 ms display
+p.addParameter('anchorHalfWidthMs',  5e-3, @(x)isfinite(x)&&x>0);   % ±5 ms anchor search
 
-% keep the time scale at ±10 ms (as requested)
-p.addParameter('winHalfWidthMs', 10e-3, @(x)isfinite(x)&&x>0);
+% Spectrogram params
+p.addParameter('specWinMs',    1e-3,  @(x)isfinite(x)&&x>0);  % STFT window length (default 1 ms)
+p.addParameter('specOverlap',  0.50,  @(x)isfinite(x)&&x>=0&&x<1); % fraction overlap
+p.addParameter('nfft',         [],    @(x) isempty(x) || (isscalar(x)&&x>0)); % default auto pow2
+p.addParameter('fMaxHz',       3000,  @(x)isfinite(x)&&x>0);  % y-axis upper limit
 
-% spectrogram params (sensible defaults for short windows)
-p.addParameter('fRangeHz', [1 150], @(v)isnumeric(v) && numel(v)==2 && v(1)>=0 && v(2)>v(1));
-p.addParameter('winMs', 4e-3, @(x)isfinite(x)&&x>0);           % analysis window length
-p.addParameter('overlapFrac', 0.75, @(x)isfinite(x)&&x>=0&&x<1);
-p.addParameter('nfft', [], @(x) isempty(x) || (isscalar(x) && x>0));  % optional override
-p.addParameter('powerScale','db', @(s) any(strcmpi(s,{'db','linear'}))); % color scale
+% Color scaling (per-event)
+p.addParameter('yRobustPct',   99.5,  @(x) isfinite(x) && x>0 && x<100);
+p.addParameter('climPadFrac',  0.12,  @(x) isfinite(x) && x>=0 && x<=0.5);
 
-% global CLim controls for power
-% If climPower is [] -> auto robust across ALL events (upper = yRobustPct).
-% For 'db', CLim = [lowerPct, upperPct] in dB; for 'linear', in linear power units.
-p.addParameter('climPower', [], @(v) isempty(v) || (isnumeric(v) && (numel(v)==2)));
-p.addParameter('yRobustPct', 99.5, @(x)isfinite(x) && x>0 && x<100);
-p.addParameter('lowPct', 1.0, @(x)isfinite(x) && x>=0 && x<100);    % lower percentile floor
-p.addParameter('climPadFrac', 0.10, @(x)isfinite(x) && x>=0 && x<=0.5);
-
+% Caps
 p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
 
 p.parse(inputFolder, dataMatPath, varargin{:});
 
-inputFolder   = string(p.Results.inputFolder);
-dataMatPath   = string(p.Results.dataMatPath);
-excelPath     = string(p.Results.excelPath);
-channelIdx    = p.Results.channelIndices;
-scaleToMicroV = p.Results.scaleToMicroV;
+inputFolder     = string(p.Results.inputFolder);
+dataMatPath     = string(p.Results.dataMatPath);
 
-anchorMode    = lower(string(p.Results.anchorMode));
-anchorHWms    = p.Results.anchorHalfWidthMs;
+excelPath       = string(p.Results.excelPath);
+channelIdx      = p.Results.channelIndices;
+scaleToMicroV   = p.Results.scaleToMicroV;
 
-winHalfMs     = p.Results.winHalfWidthMs;
+winHWms         = p.Results.winHalfWidthMs;
+anchorHWms      = p.Results.anchorHalfWidthMs;
 
-fRangeHz      = p.Results.fRangeHz;
-winMs         = p.Results.winMs;
-overlapFrac   = p.Results.overlapFrac;
-nfftOpt       = p.Results.nfft;
-powerScale    = lower(string(p.Results.powerScale));
+specWinMs       = p.Results.specWinMs;
+specOverlap     = p.Results.specOverlap;
+nfftOpt         = p.Results.nfft;
+fMaxHz          = p.Results.fMaxHz;
 
-climPowerOpt  = p.Results.climPower;
-yRobustPct    = p.Results.yRobustPct;
-lowPct        = p.Results.lowPct;
-climPadFrac   = p.Results.climPadFrac;
+yRobustPct      = p.Results.yRobustPct;
+climPadFrac     = p.Results.climPadFrac;
 
-maxEventsPer  = p.Results.maxEventsPerGroup;
+maxEventsPer    = p.Results.maxEventsPerGroup;
 
-% ---------------- Layout & IO ----------------
+% ---------------- Layout ----------------
 solidDir   = fullfile(inputFolder, "Solid");
 sputterDir = fullfile(inputFolder, "Sputter");
 assert(isfolder(solidDir),   'Missing folder: %s', solidDir);
@@ -93,8 +86,9 @@ assert(isfile(excelPath), 'Excel not found: %s', excelPath);
 outRoot = fullfile(inputFolder, "Spectral Raster Output");
 outSOL  = fullfile(outRoot, "Solid");
 outSPU  = fullfile(outRoot, "Sputter");
-if ~exist(outSOL,'dir'), mkdir(outSOL); end
-if ~exist(outSPU,'dir'), mkdir(outSPU); end
+if ~exist(outRoot,'dir'), mkdir(outRoot); end
+if ~exist(outSOL,'dir'),  mkdir(outSOL);  end
+if ~exist(outSPU,'dir'),  mkdir(outSPU);  end
 
 % ---------------- Data ----------------
 assert(isfile(dataMatPath), 'Data MAT not found: %s', dataMatPath);
@@ -104,6 +98,7 @@ nRowsAll = size(mf,'d',1);
 nSamp    = size(mf,'d',2);
 try kept_channels = mf.kept_channels; catch, kept_channels = []; end %#ok<NASGU>
 
+% Channel selection
 if isempty(channelIdx)
     chList = 1:nRowsAll;
 else
@@ -112,26 +107,20 @@ else
 end
 nCh = numel(chList);
 
-% allow per-row scaling
-if numel(scaleToMicroV) == 1
+% Scaling
+if numel(scaleToMicroV)==1
     scaleVec = repmat(scaleToMicroV, nRowsAll, 1);
 else
-    assert(numel(scaleToMicroV) >= nRowsAll, 'scaleToMicroV must be scalar or >= nRowsAll length.');
+    assert(numel(scaleToMicroV) >= nRowsAll, 'scaleToMicroV must be scalar or length >= nRowsAll.');
     scaleVec = scaleToMicroV(:);
 end
 
 % ---------------- Windows ----------------
-HWwin    = max(1, round(winHalfMs   * sfx)); % ± window (±10 ms default)
-HWanchor = max(1, round(anchorHWms  * sfx)); % ± anchor search (±5 ms)
-tRelMs   = (-HWwin:HWwin) / sfx * 1e3;       % time axis for plotting labels
-segN     = numel(tRelMs);
+HWwin    = max(1, round(winHWms    * sfx));  % ±display half-width
+HWanchor = max(1, round(anchorHWms * sfx));  % ±anchor search
+tRelMs   = (-HWwin:HWwin) / sfx * 1e3;
 
-fprintf(['SpectralRaster_Events: sfx=%.1f Hz | spectrogram stack window ±%.1f ms | ' ...
-         'anchor=%s (±%.1f ms) | fRange=[%g %g] Hz | win=%.1f ms overlap=%.0f%% | scale=%s\n'], ...
-         sfx, 1e3*HWwin/sfx, anchorMode, 1e3*HWanchor/sfx, fRangeHz(1), fRangeHz(2), ...
-         1e3*winMs, 100*overlapFrac, powerScale);
-
-% ---------------- Read Excel -> samples per row ----------------
+% ---------------- Read Excel -> on/off (samples) ----------------
 T = readtable(excelPath, 'ReadVariableNames', true);
 canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
 i_onSamp  = find(strcmp(canon,'onsamp')  | strcmp(canon,'startsample') | strcmp(canon,'startsamp') | strcmp(canon,'on'), 1);
@@ -150,230 +139,174 @@ else
     onSamp  = double(T{:,1});
     offSamp = double(T{:,2});
 end
-
 onSamp  = max(1, min(onSamp,  nSamp));
 offSamp = max(1, min(offSamp, nSamp));
 NrowsXL = numel(onSamp);
 
-% ---------------- Event IDs from PNG names ----------------
+% ---------------- Events from PNG names ----------------
 evtSOL = parseEvtNumsFromPngs(solidDir);
 evtSPU = parseEvtNumsFromPngs(sputterDir);
 fprintf('Found %d SOLID, %d SPUTTER events (by filenames).\n', numel(evtSOL), numel(evtSPU));
-
 if ~isempty(maxEventsPer)
     evtSOL = evtSOL(1:min(end, maxEventsPer));
     evtSPU = evtSPU(1:min(end, maxEventsPer));
 end
 
-% ---------------- Global CLim across ALL events (Solid + Sputter) ----------------
-if isempty(climPowerOpt)
-    fprintf('Scanning events to compute global power CLim (lowPct=%.1f%%, hiPct=%.2f%%, scale=%s)...\n', ...
-        lowPct, yRobustPct, powerScale);
-    [pLow, pHigh] = scanGlobalPowerLimits([evtSOL(:); evtSPU(:)]);
-    % pad headroom on the upper limit
-    if strcmp(powerScale,'db')
-        climGlobal = [pLow, pHigh + climPadFrac*(pHigh - pLow)];
-    else
-        climGlobal = [pLow, pHigh*(1+climPadFrac)];
-    end
+% ---------------- Spectrogram params (samples) ----------------
+specWinSamp = max(4, round(specWinMs * sfx));           % at least a few samples
+specOverlapSamp = max(0, min(specWinSamp-1, round(specOverlap * specWinSamp)));
+if isempty(nfftOpt)
+    % next power of 2 >= window length
+    nfft = 2^nextpow2(specWinSamp);
 else
-    climGlobal = climPowerOpt(:).';
+    nfft = nfftOpt;
 end
-fprintf('Global CLim (power, %s) = [%.3f, %.3f]\n', powerScale, climGlobal(1), climGlobal(2));
 
-% ---------------- Render groups ----------------
-renderGroup(evtSOL, outSOL, 'SOLID', climGlobal);
-renderGroup(evtSPU, outSPU, 'SPUTTER', climGlobal);
+fprintf(['Spectrogram params: win=%d samp (%.2f ms) | overlap=%d samp (%.0f%%) | nfft=%d | fMax=%.0f Hz | ' ...
+         'display window ±%.1f ms | anchor search ±%.1f ms\n'], ...
+        specWinSamp, 1e3*specWinSamp/sfx, specOverlapSamp, 100*specOverlapSamp/specWinSamp, ...
+        nfft, fMaxHz, 1e3*HWwin/sfx, 1e3*HWanchor/sfx);
 
-fprintf('Done. Output in: %s\n', outRoot);
+% ---------------- Build per group ----------------
+renderGroup(evtSOL, outSOL, 'SOLID');
+renderGroup(evtSPU, outSPU, 'SPUTTER');
+
+fprintf('Done. Outputs in:\n  %s\n  %s\n', outSOL, outSPU);
 
 % ======================================================================
 %                                HELPERS
 % ======================================================================
 
-function [pLow, pHigh] = scanGlobalPowerLimits(evtList)
-    % Walk events; build robust lower/upper percentiles of all power pixels
-    acc = []; %#ok<NASGU>
-    pLow = NaN; pHigh = NaN;
-
-    % We won't store pixels (too big), we aggregate percentiles per-event and combine.
-    lows  = nan(numel(evtList),1);
-    highs = nan(numel(evtList),1);
-
-    for ii = 1:numel(evtList)
-        e = evtList(ii);
-        rowXL = e;
-        if rowXL < 1 || rowXL > NrowsXL, continue; end
-
-        [ok, s0, s1] = getAnchoredWindow(rowXL);
-        if ~ok, continue; end
-
-        % For percentile scan, sample a subset of channels to keep it light if many channels
-        chSub = chList;
-        if numel(chSub) > 32
-            chSub = chSub(round(linspace(1, numel(chSub), 32)));
-        end
-
-        powPixels = [];
-        for ch = chSub
-            sc = scaleVec(ch);
-            x  = double(mf.d(ch, s0:s1)) * sc;
-            [P, ~, ~] = computeSpec(x); % per-channel
-            if strcmp(powerScale,'db')
-                pow = 10*log10(P + eps);
-            else
-                pow = P;
-            end
-            powPixels = [powPixels; pow(:)]; %#ok<AGROW>
-        end
-        if ~isempty(powPixels)
-            lows(ii)  = prctile(powPixels, lowPct);
-            highs(ii) = prctile(powPixels, yRobustPct);
-        end
-    end
-
-    % combine per-event bounds conservatively
-    if any(isfinite(lows)),  pLow  = min(lows, [], 'omitnan'); else, pLow = 0; end
-    if any(isfinite(highs)), pHigh = max(highs,[], 'omitnan'); else, pHigh = 1; end
-
-    if ~isfinite(pLow),  pLow  = 0; end
-    if ~isfinite(pHigh), pHigh = pLow + 1; end
-end
-
-function renderGroup(evtList, outDir, tag, clim)
+function renderGroup(evtList, outDir, tag)
     if isempty(evtList)
-        warning('%s: no events to render.', tag);
+        fprintf('%s: no events to render.\n', tag);
         return;
     end
     for ii = 1:numel(evtList)
         e = evtList(ii);
         rowXL = e;
-        if rowXL < 1 || rowXL > NrowsXL
-            fprintf('%s evt %d: out of Excel bounds. Skipping.\n', tag, e);
-            continue;
-        end
+        if rowXL < 1 || rowXL > NrowsXL, continue; end
 
-        [ok, s0, s1] = getAnchoredWindow(rowXL);
-        if ~ok
-            fprintf('%s evt %d: bad/missing anchor/window. Skipping.\n', tag, e);
-            continue;
-        end
+        s0_ev = round(onSamp(rowXL));
+        s1_ev = round(offSamp(rowXL));
+        if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
 
-        % ---- Build spectrogram stack: one per channel ----
-        % We also reuse the same time vector across channels
-        perRowPx = 85; basePx = 240; maxPx = 5200;
-        figH = min(maxPx, basePx + perRowPx * nCh);
-        f = figure('Color','w','Position',[80 80 1050 figH],'Visible','off');
-        tl = tiledlayout(f, nCh, 1, 'Padding','compact', 'TileSpacing','compact');
+        % ---- Anchor: first channel positive peak near midpoint ----
+        ancMid = round((s0_ev + s1_ev)/2);
+        s0a = max(1, ancMid - HWanchor);
+        s1a = min(nSamp, ancMid + HWanchor);
+        refCh = chList(1);
+        y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
+        if isempty(y0) || all(~isfinite(y0)), continue; end
+        [~, k_rel] = max(y0);
+        anchor = s0a + k_rel - 1;
 
-        t0_rel_s = -HWwin / sfx;  % start of our segment relative to anchor (s), so 0 is center
+        % ---- Display window ----
+        s0 = anchor - HWwin; 
+        s1 = anchor + HWwin;
+        if s0 < 1 || s1 > nSamp, continue; end
 
-        Tplot = []; Fplot = [];
+        % ---- Compute channel spectrograms ----
+        % Also gather power values for robust per-event CLim
+        allPow = [];
+        S_store = cell(nCh,1);
+        F_store = cell(nCh,1);
+        T_store = cell(nCh,1);
+
         for k = 1:nCh
             ch = chList(k);
             sc = scaleVec(ch);
-            x  = double(mf.d(ch, s0:s1)) * sc;
+            y = double(mf.d(ch, s0:s1)) * sc;  % samples in µV (units irrelevant for relative power)
+            if any(~isfinite(y)), y(~isfinite(y)) = 0; end
 
-            [P, F, T] = computeSpec(x);
-            % Convert T to ms relative to anchor (segment start is -HWwin)
-            Tms = (T + t0_rel_s) * 1e3;
+            % MATLAB spectrogram → S: complex STFT; F (Hz), T (sec from segment start)
+            [S, F, T] = spectrogram(y, specWinSamp, specOverlapSamp, nfft, sfx);
 
-            if isempty(Tplot), Tplot = Tms; Fplot = F; end  % reuse for axis labels
+            % Power in dB
+            P = 10*log10(abs(S).^2 + eps);  % avoid -Inf
 
-            if strcmp(powerScale,'db')
-                Z = 10*log10(P + eps);
-            else
-                Z = P;
+            % keep only F <= fMaxHz
+            idxF = F <= fMaxHz;
+            F = F(idxF); P = P(idxF, :);
+
+            % time axis (ms relative to 0 at anchor); T starts at 0
+            Tms = (T - (HWwin/sfx)) * 1e3;
+
+            S_store{k} = P;
+            F_store{k} = F;
+            T_store{k} = Tms;
+
+            allPow = [allPow; P(:)]; %#ok<AGROW>
+        end
+
+        % ---- Robust per-event CLim ----
+        allPow = allPow(isfinite(allPow));
+        if isempty(allPow)
+            fprintf('Evt %d: no finite spectrogram power; skipping.\n', e);
+            continue;
+        end
+        pval = prctile(allPow, yRobustPct);
+        clim = (1 + climPadFrac) * pval;
+
+        % ---- Figure: stacked rasters (channel 1 at top) ----
+        perRowPx = 105; basePx = 230; maxPx = 5400;
+        figH = min(maxPx, basePx + perRowPx * nCh);
+        f = figure('Color','w','Position',[60 60 1100 figH],'Visible','off');
+        tl = tiledlayout(f, nCh, 1, 'Padding','compact','TileSpacing','compact');
+
+        for k = 1:nCh
+            ax = nexttile(tl); hold(ax,'on'); box(ax,'on');
+
+            P = S_store{k};
+            F = F_store{k};
+            Tms = T_store{k};
+
+            if isempty(P)
+                % blank tile fallback
+                text(ax,0.5,0.5,'(no data)','Units','normalized','HorizontalAlignment','center');
+                continue;
             end
 
-            ax = nexttile(tl); %#ok<LUNTAG>
-            imagesc(ax, Tms, F, Z);
-            axis(ax, 'xy'); colormap(ax, jet); caxis(ax, clim);
-            xline(ax, 0, '--k', 'LineWidth', 0.7);
+            imagesc(ax, Tms, F, P);
+            axis(ax,'xy');  % low freq at bottom (y increases upward)
+            caxis(ax, [max(min(P(:)), clim-2*clim) min(max(P(:)), clim)]); % clamp top with robust clim
+            colormap(ax, parula);
+
+            % Axes formatting
             if k < nCh
                 set(ax,'XTickLabel',[]);
             else
-                xlabel(ax, 'Time (ms)');
+                xlabel(ax,'Time (ms)');
             end
-            if ~isempty(kept_channels)
-                ttl = sprintf('row %d (CSC%d)', ch, kept_channels(ch));
+            ylabel(ax,'Hz');
+            if isempty(kept_channels)
+                ttl = sprintf('row %d', chList(k));
             else
-                ttl = sprintf('row %d', ch);
+                ttl = sprintf('row %d (CSC%d)', chList(k), kept_channels(chList(k)));
             end
             title(ax, ttl, 'FontSize', 9, 'FontWeight','normal');
-            ylabel(ax, 'Hz');
-            set(ax,'FontSize',8);
+
+            % Tight y-limit to fMaxHz
+            ylim(ax, [0, fMaxHz]);
         end
 
-        % Group-level title
-        sg = sprintf('%s  |  Evt %d  |  anchor=%s (\\pm%.1f ms)  |  window=\\pm%.1f ms  |  ch=%d  |  f=[%g %g] Hz  |  scale=%s', ...
-            tag, e, char(anchorMode), 1e3*HWanchor/sfx, 1e3*HWwin/sfx, nCh, fRangeHz(1), fRangeHz(2), powerScale);
-        sgtitle(tl, sg, 'FontSize', 11, 'FontWeight','bold');
+        sg = sprintf(['%s  |  Evt %d  |  anchor: first-ch max (±%.1f ms)  |  window: \\pm%.1f ms  |  ' ...
+                      'STFT win=%.2f ms, overlap=%.0f%%, nfft=%d, fMax=%.0f Hz  |  CLim~P_%0.1f%%'], ...
+                      tag, e, 1e3*HWanchor/sfx, 1e3*HWwin/sfx, ...
+                      1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, fMaxHz, yRobustPct);
+        sgtitle(tl, sg, 'FontSize', 10, 'FontWeight', 'bold');
 
-        % Add ONE colorbar for the entire layout (attach to last axes)
-        axLast = gca;
-        cb = colorbar(axLast, 'eastoutside');
-        if strcmp(powerScale,'db')
-            cb.Label.String = 'Power (dB)';
-        else
-            cb.Label.String = 'Power (a.u.)';
-        end
+        cb = colorbar(tl, 'eastoutside');
+        cb.Label.String = 'Power (dB)';
 
-        % ---- Save ----
-        outPng = fullfile(outDir, sprintf('SpecRaster_Evt%03d.png', e));
+        outPng = fullfile(outDir, sprintf('Evt%03d_SPECT.png', e));
         exportgraphics(f, outPng, 'Resolution', 220);
         close(f);
-        fprintf('Saved %s spectrogram: %s\n', tag, outPng);
+        fprintf('Saved spectrogram: %s\n', outPng);
     end
 end
 
-function [P, F, T] = computeSpec(x)
-    % Compute single-channel spectrogram limited to fRangeHz.
-    % Window/overlap in samples
-    wSamp = max(8, round(winMs * sfx));
-    oSamp = max(0, min(wSamp-1, round(overlapFrac * wSamp)));
-    if isempty(nfftOpt)
-        nfft = 2^nextpow2(max(256, wSamp)); % guard decent freq resolution
-    else
-        nfft = nfftOpt;
-    end
-
-    [S, F, T] = spectrogram(x(:), hamming(wSamp,'periodic'), oSamp, nfft, sfx);
-    P = abs(S).^2; % linear power
-
-    % keep only desired frequency band
-    m = F >= fRangeHz(1) & F <= fRangeHz(2);
-    F = F(m);
-    P = P(m, :);
-end
-
-function [ok, s0, s1] = getAnchoredWindow(rowXL)
-    ok = false; s0 = 1; s1 = 1;
-
-    s0_ev = round(onSamp(rowXL));
-    s1_ev = round(offSamp(rowXL));
-    if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), return; end
-
-    switch anchorMode
-        case "midpoint"
-            anchor = round((s0_ev + s1_ev)/2);
-        otherwise % "firstChMax"
-            ancMid  = round((s0_ev + s1_ev)/2);
-            s0a     = max(1, ancMid - HWanchor);
-            s1a     = min(nSamp, ancMid + HWanchor);
-            refCh   = chList(1);
-            yseg0   = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
-            if isempty(yseg0) || all(~isfinite(yseg0)), return; end
-            [~, k_rel] = max(yseg0); % positive peak only
-            anchor = s0a + k_rel - 1;
-    end
-
-    s0 = anchor - HWwin;
-    s1 = anchor + HWwin;
-    if s0 < 1 || s1 > nSamp, return; end
-    ok = true;
-end
-
+% ---------------- utils ----------------
 function evts = parseEvtNumsFromPngs(dirpath)
     L = dir(fullfile(dirpath, '*.png'));
     evts = [];
@@ -385,6 +318,4 @@ function evts = parseEvtNumsFromPngs(dirpath)
         end
     end
     evts = sort(unique(evts));
-end
-
 end
