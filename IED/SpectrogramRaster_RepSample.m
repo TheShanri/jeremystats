@@ -314,7 +314,9 @@ for wi = 1:2
     end
 end
 
-cb = colorbar(tl,'eastoutside');
+% ---- Colorbar (compat-friendly) ----
+cb = colorbar;                  % attach to current figure/axes context
+set(cb, 'Location', 'eastoutside');
 cb.Label.String = sprintf('Power (dB)  |  CLim: [%.1f, %.1f]', pLo, pHi);
 
 sg = sprintf('%s  |  Evt %d  |  anchor: first-ch max (±%.1f ms)  |  STFT: win=%.3f ms, ov=%.0f%%, nfft=%d, fMax=%.0f Hz', ...
