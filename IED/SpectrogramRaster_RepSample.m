@@ -39,7 +39,7 @@ p.addParameter('scaleToMicroV', 1, @(x) isnumeric(x) && all(isfinite(x)) && all(
 
 p.addParameter('anchorHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0);
 
-p.addParameter('specWinMs',   0.1e-3, @(x)isfinite(x)&&x>0);  % 0.1 ms
+p.addParameter('specWinMs',   0.1e-2, @(x)isfinite(x)&&x>0);  % 0.4 ms
 p.addParameter('specOverlap', 0.50,   @(x)isfinite(x)&&x>=0&&x<1);
 p.addParameter('nfft',        [],     @(x) isempty(x) || (isscalar(x)&&x>0));
 p.addParameter('fMaxHz',      2000,   @(x)isfinite(x)&&x>0);
