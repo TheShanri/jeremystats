@@ -156,9 +156,30 @@ fprintf(['Spectrogram params: win=%d samp (%.3f ms) | overlap=%d samp (%.0f%%) |
          'anchor search ±%.1f ms\n'], specWinSamp, 1e3*specWinSamp/sfx, specOverlapSamp, ...
          100*specOverlapSamp/specWinSamp, nfft, fMaxHz, 1e3*(round(anchorHWms*sfx))/sfx);
 
+% ---------- Pack context for helpers ----------
+ctx = struct();
+ctx.mf = mf;
+ctx.sfx = sfx;
+ctx.nSamp = nSamp;
+ctx.onSamp = onSamp;
+ctx.offSamp = offSamp;
+ctx.NrowsXL = NrowsXL;
+ctx.chSel = chSel;
+ctx.scaleVec = scaleVec;
+ctx.kept_channels = kept_channels;
+
+ctx.specWinSamp = specWinSamp;
+ctx.specOverlapSamp = specOverlapSamp;
+ctx.nfft = nfft;
+ctx.fMaxHz = fMaxHz;
+ctx.powerUpperPct = powerUpperPct;
+ctx.powerDynRange = powerDynRange;
+
+ctx.anchorHWms = anchorHWms;  % seconds
+
 % ---------- Render ----------
-renderGroup(evtSOL, outSOL, 'SOLID');
-renderGroup(evtSPU, outSPU, 'SPUTTER');
+renderGroup(evtSOL, outSOL, 'SOLID', ctx);
+renderGroup(evtSPU, outSPU, 'SPUTTER', ctx);
 
 fprintf('Done.\n');
 
@@ -167,12 +188,12 @@ end % === main ===
 % ----------------------------------------------------------------------
 % Render a group (Solid/Sputter)
 % ----------------------------------------------------------------------
-function renderGroup(evtList, outDir, tag)
+function renderGroup(evtList, outDir, tag, ctx)
 if isempty(evtList), fprintf('%s: no events.\n', tag); return; end
 for ii = 1:numel(evtList)
     e = evtList(ii);
     try
-        renderOneEvent(e, outDir, tag);
+        renderOneEvent(e, outDir, tag, ctx);
     catch ME
         warning('%s Evt %d: %s', tag, e, ME.message);
     end
@@ -182,27 +203,26 @@ end
 % ----------------------------------------------------------------------
 % Render a single event: two windows (±20 ms top row, ±100 ms bottom row)
 % ----------------------------------------------------------------------
-function renderOneEvent(e, outDir, tag)
-% Access caller workspace variables (passed via nested function would be cleaner,
-% but to keep compatibility we rely on evalin to read main’s variables)
-mf           = evalin('caller','mf');
-sfx          = evalin('caller','sfx');
-nSamp        = evalin('caller','nSamp');
-onSamp       = evalin('caller','onSamp');
-offSamp      = evalin('caller','offSamp');
-NrowsXL      = evalin('caller','NrowsXL');
-chSel        = evalin('caller','chSel');
-scaleVec     = evalin('caller','scaleVec');
-kept_channels= evalin('caller','kept_channels');
+function renderOneEvent(e, outDir, tag, ctx)
 
-specWinSamp     = evalin('caller','specWinSamp');
-specOverlapSamp = evalin('caller','specOverlapSamp');
-nfft            = evalin('caller','nfft');
-fMaxHz          = evalin('caller','fMaxHz');
-powerUpperPct   = evalin('caller','powerUpperPct');
-powerDynRange   = evalin('caller','powerDynRange');
+mf            = ctx.mf;
+sfx           = ctx.sfx;
+nSamp         = ctx.nSamp;
+onSamp        = ctx.onSamp;
+offSamp       = ctx.offSamp;
+NrowsXL       = ctx.NrowsXL;
+chSel         = ctx.chSel;
+scaleVec      = ctx.scaleVec;
+kept_channels = ctx.kept_channels;
 
-anchorHWms      = evalin('caller','anchorHWms');  % seconds
+specWinSamp     = ctx.specWinSamp;
+specOverlapSamp = ctx.specOverlapSamp;
+nfft            = ctx.nfft;
+fMaxHz          = ctx.fMaxHz;
+powerUpperPct   = ctx.powerUpperPct;
+powerDynRange   = ctx.powerDynRange;
+
+anchorHWms      = ctx.anchorHWms;  % seconds
 HWanchor        = max(1, round(anchorHWms * sfx));
 
 % Event bounds
@@ -230,7 +250,6 @@ labels  = { '±20 ms', '±100 ms' };
 
 % Precompute CLim across all panes (both windows × channels)
 allP = [];
-allTms = cell(2,1); allF = cell(2,1); %#ok<NASGU>
 paneData = cell(2, numel(chSel)); % store P (dB), Tms, F for rendering
 
 for wi = 1:2
