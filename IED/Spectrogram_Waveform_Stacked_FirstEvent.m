@@ -1,37 +1,17 @@
 function Spectrogram_Waveform_Stacked_FirstEvent(inputFolder, dataMatPath, varargin)
 % Spectrogram_Waveform_Stacked_FirstEvent (robust tall export, auto-chunk)
 % For Solid and Sputter groups:
-%   • Detect all events (by PNG names "Evt###") but process ONLY THE FIRST
+%   • Detect all events (by PNG "Evt###") but process ONLY THE FIRST of each group
 %   • Align by first-channel positive peak within ±anchorHalfWidthMs of event midpoint
 %   • Window ±100 ms
-%   • For channels [2 12 24 34 44 54 64] (default), make a tall figure:
-%       - Row (2k-1): waveform (red) with GLOBAL y-limits (µV)
-%       - Row (2k):   spectrogram (power in dB, up to fMaxHz), shared CLim
-%   • Exports long PNG(s) without clipping; auto-splits if too tall.
+%   • Channels [2 12 24 34 44 54 64] by default (clipped to available rows)
+%   • Row pair per channel:
+%       - Waveform (red) with GLOBAL y-limits (µV)
+%       - Spectrogram (power dB, 0..fMaxHz), shared CLim across rows
+%   • Exports long PNG(s); auto-splits if too tall.
 %
 % REQUIRED dataMatPath fields:
 %   d [nRows x nSamp], sfx (Hz), kept_channels (optional)
-%
-% NAME-VALUE OPTIONS
-%   'excelPath'          : path to Excel with [on/off] (auto-detect *.xlsx in inputFolder)
-%   'channelIndices'     : override channel list (default [2 12 24 34 44 54 64])
-%   'scaleToMicroV'      : 1 (default) or per-row vector
-%   'anchorHalfWidthMs'  : ±5e-3 by default
-%   'specWinMs'          : 20e-3 by default
-%   'specOverlap'        : 0.5 by default
-%   'nfft'               : [] (auto: nextpow2(window))
-%   'fMaxHz'             : 2000 by default
-%   'yLimMicroV'         : [] → robust; else fixes waveform ylim to ±value
-%   'yRobustPct'         : 99.5 (robust percentile)
-%   'yPadFrac'           : 0.12 (headroom)
-%   'powerUpperPct'      : 99.5 (for spectrogram CLim hi)
-%   'powerDynRange'      : 40 dB (CLim low = hi - dynRange)
-%   'maxFigHeightPx'     : 14000 (auto-chunk above this)
-%   'dpi'                : 220 (export resolution)
-%
-% OUTPUT
-%   <inputFolder>/Spectrogram Waveform Stacked Output/Solid/Evt###_SpecWave_Stacked[_partNN].png
-%   <inputFolder>/Spectrogram Waveform Stacked Output/Sputter/Evt###_SpecWave_Stacked[_partNN].png
 
 % ---------- Args ----------
 p = inputParser;
@@ -170,7 +150,7 @@ fprintf('Done.\n');
         % --- Window: ±100 ms ---
         HW = max(1, round(0.100 * sfx));
         tRelMs = (-HW:HW) / sfx * 1e3;   % waveform x-axis
-        centerIdx = HW + 1;
+        centerIdx = HW + 1; %#ok<NASU> (kept for clarity)
 
         % --- Anchor by first channel positive peak within ±anchor window ---
         if e < 1 || e > NrowsXL, warning('%s Evt %d: out of range.', tag, e); return; end
@@ -226,7 +206,7 @@ fprintf('Done.\n');
         % --- Precompute CLim for spectrograms across all channels ---
         allP = [];
         Pane = cell(nCh,1);
-        for ci = 1;nCh
+        for ci = 1:nCh                      % *** FIXED: colon, not semicolon ***
             ch = chSel(ci);
             sc = scaleVec(ch);
             y  = double(mf.d(ch, s0:s1)) * sc;
@@ -281,8 +261,6 @@ fprintf('Done.\n');
                        'Renderer','opengl');  % bitmap-friendly
 
             tl = tiledlayout(f, rows, 1, 'Padding','compact','TileSpacing','compact');
-            % prevent mysterious cropping:
-            set(tl, 'Padding', 'compact', 'TileSpacing', 'compact');
 
             % Titles/labels
             if ~isempty(kept_channels)
@@ -307,7 +285,6 @@ fprintf('Done.\n');
                 if jj < nSub, ax1.XTickLabel = []; else, xlabel(ax1,'Time (ms)'); end
                 ylabel(ax1, '\muV');
                 title(ax1, sprintf('%s — waveform', chanLabels{ci}), 'FontSize',9, 'FontWeight','normal');
-                ax1.PositionConstraint = 'outerposition';
 
                 % Spectrogram
                 ax2 = nexttile(tl);
@@ -323,21 +300,25 @@ fprintf('Done.\n');
                 else
                     ax2.YTickLabel = [];
                 end
+                ylim(ax2, [0 fMax]);
                 title(ax2, sprintf('%s — spectrogram (0..%.0f Hz)', chanLabels{ci}, fMax), 'FontSize',9, 'FontWeight','normal');
-                ax2.PositionConstraint = 'outerposition';
             end
 
-            % Single colorbar (attach to figure, not layout tile)
+            % Single colorbar (attach to figure)
             cb = colorbar('eastoutside');
             cb.Label.String = sprintf('Power (dB) | CLim [%.1f, %.1f]', pLo, pHi);
 
-            sg = sprintf('%s  |  %s  |  anchor: first-ch max (\\pm%.1f ms)  |  Window: \\pm100 ms  |  STFT win=%.1f ms ov=%.0f%% nfft=%d  |  chans=%s', ...
+            sg = sprintf('%s | %s | anchor: first-ch max (\\pm%.1f ms) | Window: \\pm100 ms | STFT win=%.1f ms ov=%.0f%% nfft=%d | chans=%s', ...
                          tag, baseName, 1e3*HWanchor/sfx, 1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, mat2str(chSel(subCh)));
             sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
 
-            % Export (robust in large sizes)
+            % Export
             set(f,'PaperPositionMode','auto');
-            outPng = fullfile(outDir, baseName + (numel(chunks)>1)*sprintf('_part%02d',cidx) + ".png");
+            if numel(chunks) == 1
+                outPng = fullfile(outDir, baseName + ".png");
+            else
+                outPng = fullfile(outDir, sprintf('%s_part%02d.png', baseName, cidx));
+            end
             exportgraphics(f, outPng, 'Resolution', dpi, 'BackgroundColor','white', 'ContentType','image');
             close(f);
             fprintf('Saved %s: %s\n', tag, outPng);
