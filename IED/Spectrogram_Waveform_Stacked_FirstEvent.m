@@ -1,13 +1,14 @@
 function Spectrogram_Waveform_Stacked_ThirdEvent(inputFolder, dataMatPath, varargin)
 % Spectrogram_Waveform_Stacked_ThirdEvent
-% - Groups: Solid & Sputter (uses the 3rd event of each group, if present)
-% - Align: first-selected-channel positive peak within ±anchorHalfWidthMs of event midpoint
+% - Uses the 3rd event from SOLID and SPUTTER (if present)
+% - Picks 4 evenly spaced channels (prefers even rows), or from 'channelIndices' if provided
+% - Aligns on first-selected channel positive peak within ±anchorHalfWidthMs of midpoint
 % - Window: ±100 ms around anchor
-% - Channel selection: picks FOUR evenly spaced channels (first, left-mid, right-mid, last)
-%       * By default prefers EVEN-numbered rows (common even-only layouts)
-%       * If you pass 'channelIndices', that overrides; spacing is taken from that list
-% - Per channel row: waveform (global µV y-limit) ABOVE its spectrogram (0..2000 Hz)
-% - Exports tall PNG(s) with loose padding to avoid cropping
+% - For each selected channel: waveform (global µV y-limit) ABOVE its spectrogram (0..1000 Hz)
+% - Spectrogram x-axis is exactly [-100, +100] ms with ticks at [-100 0 100]
+% - Every spectrogram shows "Hz" on the y-axis
+%
+% OUTPUT: PNG(s) under "<inputFolder>/Spectrogram Waveform Stacked Output/{Solid,Sputter}"
 
 % ---------- Args ----------
 p = inputParser;
@@ -15,12 +16,7 @@ p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 
 p.addParameter('excelPath', "", @(s)ischar(s)||isstring(s));
-
-% If provided, we will pick four evenly spaced rows from this list
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
-
-% Prefer even rows (true by default). If true and no channelIndices provided,
-% we filter to even rows first; if that empties, we fall back to all rows.
 p.addParameter('preferEvenRows', true, @(x)islogical(x)||ismember(x,[0 1]));
 
 % Scaling
@@ -29,11 +25,11 @@ p.addParameter('scaleToMicroV', 1, @(x) isnumeric(x) && all(isfinite(x)) && all(
 % Alignment
 p.addParameter('anchorHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0);
 
-% Spectrogram params
-p.addParameter('specWinMs',   20e-3, @(x)isfinite(x)&&x>0);
+% Spectrogram params (UPDATED defaults)
+p.addParameter('specWinMs',   10e-3, @(x)isfinite(x)&&x>0);   % <- 10 ms
 p.addParameter('specOverlap', 0.50,  @(x)isfinite(x)&&x>=0&&x<1);
 p.addParameter('nfft',        [],    @(x) isempty(x) || (isscalar(x)&&x>0));
-p.addParameter('fMaxHz',      2000,  @(x)isfinite(x)&&x>0);
+p.addParameter('fMaxHz',      1000,  @(x)isfinite(x)&&x>0);   % <- 1000 Hz
 
 % Global waveform y-scale
 p.addParameter('yLimMicroV', [],   @(x) isempty(x) || (isscalar(x) && x>0));
@@ -143,13 +139,10 @@ if ~isempty(chUser)
     chBase = chUser(:).';
     chBase = chBase(chBase>=1 & chBase<=nRowsAll);
 else
-    % No user list: start from all rows
     chBase = 1:nRowsAll;
-    if preferEven
+    if p.Results.preferEvenRows
         evens = chBase(mod(chBase,2)==0);
-        if ~isempty(evens)
-            chBase = evens; % prefer even rows if available
-        end
+        if ~isempty(evens), chBase = evens; end
     end
 end
 % Pick 4 evenly spaced channels: first, left-mid, right-mid, last
@@ -157,7 +150,6 @@ if numel(chBase) >= 4
     idxPick = round(linspace(1, numel(chBase), 4));
     chSel   = unique(chBase(idxPick), 'stable');
 elseif ~isempty(chBase)
-    % if fewer than 4 exist, just take what exists (unique)
     chSel = unique(chBase, 'stable');
 else
     error('No valid channels to select from.');
@@ -170,13 +162,11 @@ if numel(evtSOL) >= 3
 else
     warning('SOLID: fewer than 3 events — skipping.');
 end
-
 if numel(evtSPU) >= 3
     renderOne(evtSPU(3), 'SPUTTER', outSPU, chSel);
 else
     warning('SPUTTER: fewer than 3 events — skipping.');
 end
-
 fprintf('Done.\n');
 
 % ======================================================================
@@ -228,7 +218,7 @@ fprintf('Done.\n');
         end
         yL_global = [-yMax, +yMax];
 
-        % --- Spectrogram params ---
+        % --- Spectrogram params (UPDATED defaults used here) ---
         specWinSamp     = max(8, round(specWinMs * sfx));
         specOverlapSamp = max(0, min(specWinSamp-1, round(specOverlap * specWinSamp)));
         if isempty(nfftOpt)
@@ -250,7 +240,8 @@ fprintf('Done.\n');
             P = 10*log10(abs(S).^2 + eps);
             msk = (F>=0) & (F<=fMax);
             F2 = F(msk); P2 = P(msk,:);
-            Tms = (T - (HW / sfx)) * 1e3;   % center at 0 ms
+            % Center time axis at 0 ms AND force to [-100, +100] exactly
+            Tms = (T - (HW / sfx)) * 1e3;
             Pane{ci} = struct('y',y, 'Tms',Tms, 'F',F2, 'P',P2);
             allP = [allP; P2(:)]; %#ok<AGROW>
         end
@@ -258,13 +249,13 @@ fprintf('Done.\n');
         if isempty(allP), pHi = 0; else, pHi = prctile(allP, powerUpperPct); end
         pLo = pHi - powerDynRange;
 
-        % ---------- Figure (loose padding to avoid crop) ----------
+        % ---------- Figure ----------
         rowsPerChan = 2;                 % waveform + spectrogram
         rowsTotal   = rowsPerChan * nCh;
 
-        perRowPx   = 130;                % a bit taller to give labels room
-        figW       = 1000;               % width (px)
-        topBotPad  = 320;                % generous top/bottom margin
+        perRowPx   = 130;
+        figW       = 1000;
+        topBotPad  = 320;
         figH_full  = topBotPad + perRowPx*rowsTotal;
 
         if figH_full <= maxFigH
@@ -282,7 +273,7 @@ fprintf('Done.\n');
         if ~exist(outDir,'dir'), mkdir(outDir); end
         baseName = sprintf('Evt%03d_SpecWave_Stacked', e);
 
-        % Make human-friendly labels
+        % Labels for channels
         if ~isempty(kept_channels)
             chanLabelAll = arrayfun(@(kk) sprintf('row %d (CSC%d)', chSel(kk), kept_channels(chSel(kk))), 1:nCh, 'UniformOutput', false);
         else
@@ -314,6 +305,8 @@ fprintf('Done.\n');
                 xline(ax1,0,'--k','LineWidth',0.9);
                 yline(ax1,0,':','Color',[0.7 0.7 0.7]);
                 ylim(ax1, yL_global);
+                xlim(ax1, [-100 100]);                       % align with spectrogram x-range
+                xticks(ax1, [-100 0 100]);                   % force −100, 0, 100
                 ax1.TickDir = 'out'; ax1.FontSize = 9;
                 if jj < nSub, ax1.XTickLabel = []; else, xlabel(ax1,'Time (ms)'); end
                 ylabel(ax1, '\muV');
@@ -326,10 +319,13 @@ fprintf('Done.\n');
                 colormap(ax2, parula);
                 caxis(ax2, [pLo pHi]);
                 xline(ax2,0,'--k','LineWidth',0.9,'Color',[0 0 0 0.6]);
-                ylim(ax2, [0 fMax]);
+                ylim(ax2, [0 fMax]);                           % 0..1000 Hz
+                xlim(ax2, [-100 100]);                         % exactly −100..+100 ms
+                xticks(ax2, [-100 0 100]);                     % ticks at −100, 0, +100
                 ax2.TickDir = 'out'; ax2.FontSize = 9;
+                % >>> Show Hz for EVERY channel:
+                ylabel(ax2, 'Hz');
                 if jj < nSub, ax2.XTickLabel = []; else, xlabel(ax2,'Time (ms)'); end
-                if jj==1, ylabel(ax2, 'Hz'); else, ax2.YTickLabel = []; end
                 title(ax2, sprintf('%s — spectrogram (0..%.0f Hz)', chanLabelAll{ci}, fMax), 'FontSize',9, 'FontWeight','normal');
             end
 
