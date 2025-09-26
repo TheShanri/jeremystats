@@ -1,17 +1,11 @@
 function Spectrogram_Waveform_Stacked_FirstEvent(inputFolder, dataMatPath, varargin)
-% Spectrogram_Waveform_Stacked_FirstEvent (robust tall export, auto-chunk)
-% For Solid and Sputter groups:
-%   • Detect all events (by PNG "Evt###") but process ONLY THE FIRST of each group
-%   • Align by first-channel positive peak within ±anchorHalfWidthMs of event midpoint
-%   • Window ±100 ms
-%   • Channels [2 12 24 34 44 54 64] by default (clipped to available rows)
-%   • Row pair per channel:
-%       - Waveform (red) with GLOBAL y-limits (µV)
-%       - Spectrogram (power dB, 0..fMaxHz), shared CLim across rows
-%   • Exports long PNG(s); auto-splits if too tall.
-%
-% REQUIRED dataMatPath fields:
-%   d [nRows x nSamp], sfx (Hz), kept_channels (optional)
+% Spectrogram_Waveform_Stacked_FirstEvent (no-crop, fixed channels)
+% - Groups: Solid & Sputter (uses ONLY the first event in each group)
+% - Align: first-channel positive peak within ±anchorHalfWidthMs of event midpoint
+% - Window: ±100 ms
+% - Channels: [12 22 32 52] (clipped to available rows)
+% - Per channel: (1) waveform (global y) above (2) spectrogram (0..2000 Hz)
+% - Exports tall PNG(s); adds generous margins and loose padding to avoid cropping
 
 % ---------- Args ----------
 p = inputParser;
@@ -19,7 +13,7 @@ p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 
 p.addParameter('excelPath', "", @(s)ischar(s)||isstring(s));
-p.addParameter('channelIndices', [2 12 24 34 44 54 64], @(v) isnumeric(v) && all(v>=1));
+p.addParameter('channelIndices', [12 22 32 52], @(v) isnumeric(v) && all(v>=1));
 p.addParameter('scaleToMicroV', 1, @(x) isnumeric(x) && all(isfinite(x)) && all(x>0));
 
 p.addParameter('anchorHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0);
@@ -29,14 +23,17 @@ p.addParameter('specOverlap', 0.50,  @(x)isfinite(x)&&x>=0&&x<1);
 p.addParameter('nfft',        [],    @(x) isempty(x) || (isscalar(x)&&x>0));
 p.addParameter('fMaxHz',      2000,  @(x)isfinite(x)&&x>0);
 
+% Global waveform y-scale
 p.addParameter('yLimMicroV', [],   @(x) isempty(x) || (isscalar(x) && x>0));
 p.addParameter('yRobustPct', 99.5, @(x) isfinite(x) && x>0 && x<100);
 p.addParameter('yPadFrac',   0.12, @(x) isfinite(x) && x>=0 && x<=0.5);
 
+% Spectrogram color scaling (dB)
 p.addParameter('powerUpperPct', 99.5, @(x)isfinite(x)&&x>0&&x<100);
 p.addParameter('powerDynRange', 40,   @(x)isfinite(x)&&x>0);
 
-p.addParameter('maxFigHeightPx', 14000, @(x)isfinite(x)&&x>1000);
+% Export
+p.addParameter('maxFigHeightPx', 16000, @(x)isfinite(x)&&x>1000);
 p.addParameter('dpi',            220,    @(x)isfinite(x)&&x>=72);
 
 p.parse(inputFolder, dataMatPath, varargin{:});
@@ -92,7 +89,7 @@ nRowsAll = size(mf,'d',1);
 nSamp    = size(mf,'d',2);
 try kept_channels = mf.kept_channels; catch, kept_channels = []; end %#ok<NASGU>
 
-% Channels
+% Channels (clip to existing rows)
 chSel = chSel(chSel>=1 & chSel<=nRowsAll);
 assert(~isempty(chSel), 'No valid channels in data after clipping.');
 nCh = numel(chSel);
@@ -133,7 +130,7 @@ evtSOL = parseEvtNumsFromPngs(solidDir);
 evtSPU = parseEvtNumsFromPngs(sputterDir);
 fprintf('Found %d SOLID, %d SPUTTER (by filenames). Using the FIRST of each if present.\n', numel(evtSOL), numel(evtSPU));
 
-% ---------- Process first found in each group (if any) ----------
+% ---------- Process first of each group ----------
 if ~isempty(evtSOL)
     renderOne(evtSOL(1), 'SOLID', outSOL);
 end
@@ -149,10 +146,9 @@ fprintf('Done.\n');
     function renderOne(e, tag, outDir)
         % --- Window: ±100 ms ---
         HW = max(1, round(0.100 * sfx));
-        tRelMs = (-HW:HW) / sfx * 1e3;   % waveform x-axis
-        centerIdx = HW + 1; %#ok<NASU> (kept for clarity)
+        tRelMs = (-HW:HW) / sfx * 1e3;
 
-        % --- Anchor by first channel positive peak within ±anchor window ---
+        % --- Anchor by first selected channel positive peak within ±anchor window ---
         if e < 1 || e > NrowsXL, warning('%s Evt %d: out of range.', tag, e); return; end
         s0_ev = round(onSamp(e)); s1_ev = round(offSamp(e));
         if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev)
@@ -203,10 +199,10 @@ fprintf('Done.\n');
         end
         fMax = min(fMaxHz, sfx/2);
 
-        % --- Precompute CLim for spectrograms across all channels ---
+        % --- Precompute CLim across all channels ---
         allP = [];
         Pane = cell(nCh,1);
-        for ci = 1:nCh                      % *** FIXED: colon, not semicolon ***
+        for ci = 1:nCh
             ch = chSel(ci);
             sc = scaleVec(ch);
             y  = double(mf.d(ch, s0:s1)) * sc;
@@ -223,22 +219,20 @@ fprintf('Done.\n');
         if isempty(allP), pHi = 0; else, pHi = prctile(allP, powerUpperPct); end
         pLo = pHi - powerDynRange;
 
-        % --- Layout size / chunking ---
-        rowsPerChan = 2;   % (waveform + spectrogram)
+        % ---------- Figure (loose padding to avoid crop) ----------
+        rowsPerChan = 2;                 % waveform + spectrogram
         rowsTotal   = rowsPerChan * nCh;
 
-        perRowPx   = 110;          % height per row (pixels)
-        figW       = 980;          % fixed width (pixels)
-        basePx     = 220;          % title/colorbar margin
-        figH_full  = basePx + perRowPx*rowsTotal;
+        perRowPx   = 130;                % a bit taller to give labels room
+        figW       = 1000;               % width (px)
+        topBotPad  = 320;                % generous top/bottom margin (prevents cropping)
+        figH_full  = topBotPad + perRowPx*rowsTotal;
 
-        % If too tall, chunk by channels
         if figH_full <= maxFigH
             chunks = {1:nCh};
         else
-            chansPerChunk = max(1, floor( (maxFigH - basePx) / (perRowPx*rowsPerChan) ));
-            idx = 1:nCh;
-            chunks = {};
+            chansPerChunk = max(1, floor( (maxFigH - topBotPad) / (perRowPx*rowsPerChan) ));
+            idx = 1:nCh; chunks = {};
             while ~isempty(idx)
                 take = min(chansPerChunk, numel(idx));
                 chunks{end+1} = idx(1:take); %#ok<AGROW>
@@ -254,22 +248,24 @@ fprintf('Done.\n');
             nSub  = numel(subCh);
             rows  = rowsPerChan * nSub;
 
-            figH = basePx + perRowPx*rows;
+            figH = topBotPad + perRowPx*rows;
             figH = min(figH, maxFigH);
 
-            f = figure('Color','w','Visible','off','Units','pixels','Position',[60 60 figW figH], ...
-                       'Renderer','opengl');  % bitmap-friendly
+            f = figure('Color','w','Visible','off','Units','pixels', ...
+                       'Position',[60 60 figW figH], 'Renderer','opengl', ...
+                       'InvertHardcopy','off');
 
-            tl = tiledlayout(f, rows, 1, 'Padding','compact','TileSpacing','compact');
+            % Use loose padding to avoid any cropping of titles/colorbar
+            tl = tiledlayout(f, rows, 1, 'Padding','loose','TileSpacing','compact');
 
-            % Titles/labels
+            % Labels
             if ~isempty(kept_channels)
                 chanLabels = arrayfun(@(kk) sprintf('row %d (CSC%d)', chSel(kk), kept_channels(chSel(kk))), 1:nCh, 'UniformOutput', false);
             else
                 chanLabels = arrayfun(@(kk) sprintf('row %d', chSel(kk)), 1:nCh, 'UniformOutput', false);
             end
 
-            % Render rows for this chunk
+            % Render channel blocks
             for jj = 1:nSub
                 ci = subCh(jj);
                 D  = Pane{ci};
@@ -277,11 +273,11 @@ fprintf('Done.\n');
                 % Waveform (red)
                 ax1 = nexttile(tl);
                 hold(ax1,'on'); box(ax1,'on'); grid(ax1,'on');
-                plot(ax1, tRelMs, D.y, 'Color',[0.85 0.10 0.10], 'LineWidth',1.5);
+                plot(ax1, tRelMs, D.y, 'Color',[0.85 0.10 0.10], 'LineWidth',1.6);
                 xline(ax1,0,'--k','LineWidth',0.9);
                 yline(ax1,0,':','Color',[0.7 0.7 0.7]);
                 ylim(ax1, yL_global);
-                ax1.TickDir = 'out'; ax1.FontSize = 8;
+                ax1.TickDir = 'out'; ax1.FontSize = 9;
                 if jj < nSub, ax1.XTickLabel = []; else, xlabel(ax1,'Time (ms)'); end
                 ylabel(ax1, '\muV');
                 title(ax1, sprintf('%s — waveform', chanLabels{ci}), 'FontSize',9, 'FontWeight','normal');
@@ -293,27 +289,30 @@ fprintf('Done.\n');
                 colormap(ax2, parula);
                 caxis(ax2, [pLo pHi]);
                 xline(ax2,0,'--k','LineWidth',0.9,'Color',[0 0 0 0.6]);
-                ax2.TickDir = 'out'; ax2.FontSize = 8;
+                ylim(ax2, [0 fMax]);
+                ax2.TickDir = 'out'; ax2.FontSize = 9;
                 if jj < nSub, ax2.XTickLabel = []; else, xlabel(ax2,'Time (ms)'); end
                 if jj==1
                     ylabel(ax2, 'Hz');
                 else
                     ax2.YTickLabel = [];
                 end
-                ylim(ax2, [0 fMax]);
                 title(ax2, sprintf('%s — spectrogram (0..%.0f Hz)', chanLabels{ci}, fMax), 'FontSize',9, 'FontWeight','normal');
             end
 
-            % Single colorbar (attach to figure)
+            % Single colorbar to the right
             cb = colorbar('eastoutside');
             cb.Label.String = sprintf('Power (dB) | CLim [%.1f, %.1f]', pLo, pHi);
 
+            % Group title (smaller to avoid clipping)
             sg = sprintf('%s | %s | anchor: first-ch max (\\pm%.1f ms) | Window: \\pm100 ms | STFT win=%.1f ms ov=%.0f%% nfft=%d | chans=%s', ...
                          tag, baseName, 1e3*HWanchor/sfx, 1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, mat2str(chSel(subCh)));
             sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
 
-            % Export
+            % Export (drawnow to finalize layout; loose padding prevents crop)
+            drawnow;
             set(f,'PaperPositionMode','auto');
+
             if numel(chunks) == 1
                 outPng = fullfile(outDir, baseName + ".png");
             else
