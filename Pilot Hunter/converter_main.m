@@ -5,7 +5,7 @@
 % 1. Define the full path to the input and output files.
 %    - Replace 'C:\MyData\2024\Exp1\my_data.ncs' with the actual path to your file.
 %    - The output .mat file will be saved in the same directory.
-ncsFilePath = 'C:\MyData\2024\Exp1\my_data.ncs'; 
+ncsFilePath = 'C:\Users\Barry Lab\Desktop\TestIEDData\M13s2aug1\2023-08-01_12-11-26\CSC20.ncs'; 
 [folder, name, ~] = fileparts(ncsFilePath);
 matFilePath = fullfile(folder, [name '.mat']);
 
