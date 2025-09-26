@@ -1,11 +1,13 @@
-function Spectrogram_Waveform_Stacked_FirstEvent(inputFolder, dataMatPath, varargin)
-% Spectrogram_Waveform_Stacked_FirstEvent (no-crop, fixed channels)
-% - Groups: Solid & Sputter (uses ONLY the first event in each group)
-% - Align: first-channel positive peak within ±anchorHalfWidthMs of event midpoint
-% - Window: ±100 ms
-% - Channels: [12 22 32 52] (clipped to available rows)
-% - Per channel: (1) waveform (global y) above (2) spectrogram (0..2000 Hz)
-% - Exports tall PNG(s); adds generous margins and loose padding to avoid cropping
+function Spectrogram_Waveform_Stacked_ThirdEvent(inputFolder, dataMatPath, varargin)
+% Spectrogram_Waveform_Stacked_ThirdEvent
+% - Groups: Solid & Sputter (uses the 3rd event of each group, if present)
+% - Align: first-selected-channel positive peak within ±anchorHalfWidthMs of event midpoint
+% - Window: ±100 ms around anchor
+% - Channel selection: picks FOUR evenly spaced channels (first, left-mid, right-mid, last)
+%       * By default prefers EVEN-numbered rows (common even-only layouts)
+%       * If you pass 'channelIndices', that overrides; spacing is taken from that list
+% - Per channel row: waveform (global µV y-limit) ABOVE its spectrogram (0..2000 Hz)
+% - Exports tall PNG(s) with loose padding to avoid cropping
 
 % ---------- Args ----------
 p = inputParser;
@@ -13,11 +15,21 @@ p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
 p.addRequired('dataMatPath', @(s)ischar(s)||isstring(s));
 
 p.addParameter('excelPath', "", @(s)ischar(s)||isstring(s));
-p.addParameter('channelIndices', [12 22 32 52], @(v) isnumeric(v) && all(v>=1));
+
+% If provided, we will pick four evenly spaced rows from this list
+p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
+
+% Prefer even rows (true by default). If true and no channelIndices provided,
+% we filter to even rows first; if that empties, we fall back to all rows.
+p.addParameter('preferEvenRows', true, @(x)islogical(x)||ismember(x,[0 1]));
+
+% Scaling
 p.addParameter('scaleToMicroV', 1, @(x) isnumeric(x) && all(isfinite(x)) && all(x>0));
 
+% Alignment
 p.addParameter('anchorHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0);
 
+% Spectrogram params
 p.addParameter('specWinMs',   20e-3, @(x)isfinite(x)&&x>0);
 p.addParameter('specOverlap', 0.50,  @(x)isfinite(x)&&x>=0&&x<1);
 p.addParameter('nfft',        [],    @(x) isempty(x) || (isscalar(x)&&x>0));
@@ -32,7 +44,7 @@ p.addParameter('yPadFrac',   0.12, @(x) isfinite(x) && x>=0 && x<=0.5);
 p.addParameter('powerUpperPct', 99.5, @(x)isfinite(x)&&x>0&&x<100);
 p.addParameter('powerDynRange', 40,   @(x)isfinite(x)&&x>0);
 
-% Export
+% Export controls
 p.addParameter('maxFigHeightPx', 16000, @(x)isfinite(x)&&x>1000);
 p.addParameter('dpi',            220,    @(x)isfinite(x)&&x>=72);
 
@@ -41,7 +53,8 @@ inputFolder     = string(p.Results.inputFolder);
 dataMatPath     = string(p.Results.dataMatPath);
 
 excelPath       = string(p.Results.excelPath);
-chSel           = unique(p.Results.channelIndices(:).');
+chUser          = p.Results.channelIndices;
+preferEven      = p.Results.preferEvenRows;
 scaleToMicroV   = p.Results.scaleToMicroV;
 
 anchorHWms      = p.Results.anchorHalfWidthMs;
@@ -89,12 +102,7 @@ nRowsAll = size(mf,'d',1);
 nSamp    = size(mf,'d',2);
 try kept_channels = mf.kept_channels; catch, kept_channels = []; end %#ok<NASGU>
 
-% Channels (clip to existing rows)
-chSel = chSel(chSel>=1 & chSel<=nRowsAll);
-assert(~isempty(chSel), 'No valid channels in data after clipping.');
-nCh = numel(chSel);
-
-% Scaling
+% Scaling vector
 if numel(scaleToMicroV)==1
     scaleVec = repmat(scaleToMicroV, nRowsAll, 1);
 else
@@ -125,17 +133,48 @@ onSamp  = max(1, min(onSamp,  nSamp));
 offSamp = max(1, min(offSamp, nSamp));
 NrowsXL = numel(onSamp);
 
-% ---------- Events ----------
+% ---------- Events from PNG names ----------
 evtSOL = parseEvtNumsFromPngs(solidDir);
 evtSPU = parseEvtNumsFromPngs(sputterDir);
-fprintf('Found %d SOLID, %d SPUTTER (by filenames). Using the FIRST of each if present.\n', numel(evtSOL), numel(evtSPU));
+fprintf('Found %d SOLID, %d SPUTTER (by filenames). Using the 3rd of each if present.\n', numel(evtSOL), numel(evtSPU));
 
-% ---------- Process first of each group ----------
-if ~isempty(evtSOL)
-    renderOne(evtSOL(1), 'SOLID', outSOL);
+% ---------- Channel selection (flexible & even-aware) ----------
+if ~isempty(chUser)
+    chBase = chUser(:).';
+    chBase = chBase(chBase>=1 & chBase<=nRowsAll);
+else
+    % No user list: start from all rows
+    chBase = 1:nRowsAll;
+    if preferEven
+        evens = chBase(mod(chBase,2)==0);
+        if ~isempty(evens)
+            chBase = evens; % prefer even rows if available
+        end
+    end
 end
-if ~isempty(evtSPU)
-    renderOne(evtSPU(1), 'SPUTTER', outSPU);
+% Pick 4 evenly spaced channels: first, left-mid, right-mid, last
+if numel(chBase) >= 4
+    idxPick = round(linspace(1, numel(chBase), 4));
+    chSel   = unique(chBase(idxPick), 'stable');
+elseif ~isempty(chBase)
+    % if fewer than 4 exist, just take what exists (unique)
+    chSel = unique(chBase, 'stable');
+else
+    error('No valid channels to select from.');
+end
+nCh = numel(chSel);
+
+% ---------- Render 3rd event of each group ----------
+if numel(evtSOL) >= 3
+    renderOne(evtSOL(3), 'SOLID', outSOL, chSel);
+else
+    warning('SOLID: fewer than 3 events — skipping.');
+end
+
+if numel(evtSPU) >= 3
+    renderOne(evtSPU(3), 'SPUTTER', outSPU, chSel);
+else
+    warning('SPUTTER: fewer than 3 events — skipping.');
 end
 
 fprintf('Done.\n');
@@ -143,7 +182,7 @@ fprintf('Done.\n');
 % ======================================================================
 %                              NESTED: RENDER
 % ======================================================================
-    function renderOne(e, tag, outDir)
+    function renderOne(e, tag, outDir, chSel)
         % --- Window: ±100 ms ---
         HW = max(1, round(0.100 * sfx));
         tRelMs = (-HW:HW) / sfx * 1e3;
@@ -171,7 +210,7 @@ fprintf('Done.\n');
             warning('%s Evt %d: window out of bounds.', tag, e); return;
         end
 
-        % --- Collect waveforms to compute GLOBAL y-limits ---
+        % --- Collect waveforms for GLOBAL y-limits ---
         rob = 0;
         for ci = 1:nCh
             ch = chSel(ci);
@@ -199,7 +238,7 @@ fprintf('Done.\n');
         end
         fMax = min(fMaxHz, sfx/2);
 
-        % --- Precompute CLim across all channels ---
+        % --- Precompute CLim across selected channels ---
         allP = [];
         Pane = cell(nCh,1);
         for ci = 1:nCh
@@ -225,7 +264,7 @@ fprintf('Done.\n');
 
         perRowPx   = 130;                % a bit taller to give labels room
         figW       = 1000;               % width (px)
-        topBotPad  = 320;                % generous top/bottom margin (prevents cropping)
+        topBotPad  = 320;                % generous top/bottom margin
         figH_full  = topBotPad + perRowPx*rowsTotal;
 
         if figH_full <= maxFigH
@@ -243,6 +282,13 @@ fprintf('Done.\n');
         if ~exist(outDir,'dir'), mkdir(outDir); end
         baseName = sprintf('Evt%03d_SpecWave_Stacked', e);
 
+        % Make human-friendly labels
+        if ~isempty(kept_channels)
+            chanLabelAll = arrayfun(@(kk) sprintf('row %d (CSC%d)', chSel(kk), kept_channels(chSel(kk))), 1:nCh, 'UniformOutput', false);
+        else
+            chanLabelAll = arrayfun(@(kk) sprintf('row %d', chSel(kk)), 1:nCh, 'UniformOutput', false);
+        end
+
         for cidx = 1:numel(chunks)
             subCh = chunks{cidx};
             nSub  = numel(subCh);
@@ -255,17 +301,8 @@ fprintf('Done.\n');
                        'Position',[60 60 figW figH], 'Renderer','opengl', ...
                        'InvertHardcopy','off');
 
-            % Use loose padding to avoid any cropping of titles/colorbar
             tl = tiledlayout(f, rows, 1, 'Padding','loose','TileSpacing','compact');
 
-            % Labels
-            if ~isempty(kept_channels)
-                chanLabels = arrayfun(@(kk) sprintf('row %d (CSC%d)', chSel(kk), kept_channels(chSel(kk))), 1:nCh, 'UniformOutput', false);
-            else
-                chanLabels = arrayfun(@(kk) sprintf('row %d', chSel(kk)), 1:nCh, 'UniformOutput', false);
-            end
-
-            % Render channel blocks
             for jj = 1:nSub
                 ci = subCh(jj);
                 D  = Pane{ci};
@@ -280,7 +317,7 @@ fprintf('Done.\n');
                 ax1.TickDir = 'out'; ax1.FontSize = 9;
                 if jj < nSub, ax1.XTickLabel = []; else, xlabel(ax1,'Time (ms)'); end
                 ylabel(ax1, '\muV');
-                title(ax1, sprintf('%s — waveform', chanLabels{ci}), 'FontSize',9, 'FontWeight','normal');
+                title(ax1, sprintf('%s — waveform', chanLabelAll{ci}), 'FontSize',9, 'FontWeight','normal');
 
                 % Spectrogram
                 ax2 = nexttile(tl);
@@ -292,12 +329,8 @@ fprintf('Done.\n');
                 ylim(ax2, [0 fMax]);
                 ax2.TickDir = 'out'; ax2.FontSize = 9;
                 if jj < nSub, ax2.XTickLabel = []; else, xlabel(ax2,'Time (ms)'); end
-                if jj==1
-                    ylabel(ax2, 'Hz');
-                else
-                    ax2.YTickLabel = [];
-                end
-                title(ax2, sprintf('%s — spectrogram (0..%.0f Hz)', chanLabels{ci}, fMax), 'FontSize',9, 'FontWeight','normal');
+                if jj==1, ylabel(ax2, 'Hz'); else, ax2.YTickLabel = []; end
+                title(ax2, sprintf('%s — spectrogram (0..%.0f Hz)', chanLabelAll{ci}, fMax), 'FontSize',9, 'FontWeight','normal');
             end
 
             % Single colorbar to the right
@@ -305,11 +338,10 @@ fprintf('Done.\n');
             cb.Label.String = sprintf('Power (dB) | CLim [%.1f, %.1f]', pLo, pHi);
 
             % Group title (smaller to avoid clipping)
-            sg = sprintf('%s | %s | anchor: first-ch max (\\pm%.1f ms) | Window: \\pm100 ms | STFT win=%.1f ms ov=%.0f%% nfft=%d | chans=%s', ...
+            sg = sprintf('%s | %s | anchor: first-selected max (\\pm%.1f ms) | Window: \\pm100 ms | STFT win=%.1f ms ov=%.0f%% nfft=%d | chans=%s', ...
                          tag, baseName, 1e3*HWanchor/sfx, 1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, mat2str(chSel(subCh)));
             sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
 
-            % Export (drawnow to finalize layout; loose padding prevents crop)
             drawnow;
             set(f,'PaperPositionMode','auto');
 
