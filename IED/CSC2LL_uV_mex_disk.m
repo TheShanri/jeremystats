@@ -1,35 +1,59 @@
-function CSC2LL_uV_mex_disk()
-% CSC2LL_uV_mex_disk
-% Convert Neuralynx CSC#.ncs → LLspikedetector-ready .mat (disk-backed) and scale to MICROVOLTS.
-% - Efficient two-pass design (no huge RAM prealloc)
-% - Optional even-channel subset
-% - Per-channel ADBitVolts parsed from header; fallback default if missing
-% - 'd' is saved already in microvolts (µV), NaN-padded to equalize row lengths
+function CSC2LL_uV_mex_disk(basePath, varargin)
+% CSC2LL_uV_mex_disk(basePath, Name,Value,...)
+% Convert a folder of Neuralynx CSC#.ncs → LLspikedetector-ready .mat (disk-backed) in MICROVOLTS.
 %
-% Outputs inside the .mat:
-%   d              : [nKept x maxN] disk-backed array, MICROVOLTS (single|double)
+% REQUIRED:
+%   basePath   : folder that contains CSC#.ncs files (e.g., CSC1.ncs..CSC64.ncs)
+%
+% OPTIONS (Name,Value):
+%   'nTotalCh'    (default 64)      : total channels expected (1..nTotalCh)
+%   'evenOnly'    (default true)    : keep only even channels (2,4,6,...) if true
+%   'keep'        (default [])      : explicit list of channels to keep (overrides evenOnly)
+%   'storeClass'  (default 'single'): 'single' or 'double' for saved data
+%   'outName'     (default auto)    : output MAT filename (placed in basePath)
+%   'fallbackADBV'(default 0.00000006103515625) : V/AD used if header lacks ADBitVolts
+%   'reqsPath'    (default ./reqsPath): folder containing Nlx2MatCSC MEX if not already on path
+%
+% OUTPUT .mat (disk-backed; saved in basePath):
+%   d              : [nKept x maxN] MICROVOLTS (µV), NaN-padded
 %   sfx            : unified sampling rate (Hz), mode across good kept channels
-%   badch          : logical(1, nTotalCh), marks missing/bad (original index space)
-%   chan_labels    : {'CSC1'..'CSC64'} style labels for all original channels
-%   kept_channels  : indices of channels written into 'd'
-%   headersCell    : 1 x nKept cell of header lines (per kept channel)
-%   meta           : struct with provenance (incl. ADBitVolts per kept ch)
-%   units          : 'microvolts' (string)
+%   badch          : logical(1,nTotalCh), marks missing/bad (original indexing)
+%   chan_labels    : {'CSC1'..'CSCn'}
+%   kept_channels  : channels written
+%   headersCell    : header lines for each kept channel
+%   units          : 'microvolts'
+%   meta           : provenance (fileListKept, ADBitVolts per kept ch, etc.)
 %
-% REQUIREMENT: Nlx2MatCSC MEX must be on the path (e.g., in reqsPath).
-%
-% ---------------- USER SETTINGS ----------------
-reqsPath     = fullfile(fileparts(mfilename('fullpath')), 'reqsPath');
-basePath     = 'C:\Users\Barry Lab\Desktop\TestIEDData\M13s2aug1\2023-08-01_12-11-26';
-nTotalCh     = 64;            % expects CSC1.ncs ... CSC64.ncs
-evenOnly     = true;          % true → include only even channels (2,4,6,...)
-storeClass   = 'single';      % 'single' (recommended) or 'double'
-outName      = 'LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat';
-% If a channel lacks ADBitVolts, fall back to this (V/AD). (61.03515625 nV/AD)
-fallbackADBV = 0.00000006103515625;
-% ------------------------------------------------
+% USAGE:
+%   CSC2LL_uV_mex_disk('C:\data\AnimalX\2023-08-01_12-11-26');
+%   CSC2LL_uV_mex_disk('C:\data\Rec', 'nTotalCh', 32, 'evenOnly', false, 'keep', [1 3 5], 'storeClass','double');
 
-% ---- PATH & MEX checks ----
+% ---------- Parse inputs ----------
+ip = inputParser;
+ip.addRequired('basePath', @(s)ischar(s)||isstring(s));
+ip.addParameter('nTotalCh', 64, @(x)isnumeric(x)&&isscalar(x)&&x>=1);
+ip.addParameter('evenOnly', true, @(x)islogical(x)||ismember(x,[0,1]));
+ip.addParameter('keep', [], @(v)isnumeric(v)&&isvector(v)&&all(v>=1));
+ip.addParameter('storeClass', 'single', @(s)ischar(s)||isstring(s));
+ip.addParameter('outName', '', @(s)ischar(s)||isstring(s));
+ip.addParameter('fallbackADBV', 0.00000006103515625, @(x)isfinite(x)&&x>0); % V/AD
+ip.addParameter('reqsPath', fullfile(fileparts(mfilename('fullpath')), 'reqsPath'), @(s)ischar(s)||isstring(s));
+ip.parse(basePath, varargin{:});
+
+basePath     = char(ip.Results.basePath);
+nTotalCh     = ip.Results.nTotalCh;
+evenOnly     = logical(ip.Results.evenOnly);
+keep         = ip.Results.keep;
+storeClass   = char(ip.Results.storeClass);
+outName      = char(ip.Results.outName);
+fallbackADBV = ip.Results.fallbackADBV;
+reqsPath     = char(ip.Results.reqsPath);
+
+if ~isfolder(basePath)
+    error('Base folder not found: %s', basePath);
+end
+
+% ---------- PATH & MEX checks ----------
 if isfolder(reqsPath), addpath(reqsPath); end
 rehash toolboxcache; clear mex;
 nlxPaths = which('-all','Nlx2MatCSC');
@@ -41,15 +65,30 @@ if ~any(endsWith(string(nlxPaths), ['.',mexext], 'IgnoreCase',true))
 end
 fprintf('Using Nlx2MatCSC found at:\n'); disp(nlxPaths(:));
 
-% ---- Channel selection ----
+% ---------- Channel selection ----------
 allCh = 1:nTotalCh;
-if evenOnly, kept_channels = allCh(mod(allCh,2)==0); else, kept_channels = allCh; end
+if ~isempty(keep)
+    kept_channels = intersect(allCh, unique(keep(:)'));
+elseif evenOnly
+    kept_channels = allCh(mod(allCh,2)==0); % 2,4,6,...
+else
+    kept_channels = allCh;                   % 1..nTotalCh
+end
 nKept = numel(kept_channels);
+if nKept==0, error('No channels selected to keep.'); end
+
 fprintf('Channels to include: %d of %d\n', nKept, nTotalCh);
 fprintf('First few: %s\n', mat2str(kept_channels(1:min(10,nKept))));
 
-% ---- Containers for a first pass (sizes, sfx, ADBV) ----
-FS = [1 1 1 1 1]; EH = 1; EM = 1;
+% ---------- Auto output name if empty ----------
+if isempty(strtrim(outName))
+    [~, tail] = fileparts(basePath);
+    outName = sprintf('LL_input_%s_mex_disk_uV.mat', tail);
+end
+outFull = fullfile(basePath, outName);
+
+% ---------- First pass: sizes, sfx, ADBV ----------
+FS = [1 1 1 1 1];  EH = 1;  EM = 1;
 fileListKept = strings(1, nKept);
 headersCell  = cell(1, nKept);
 sfxArr       = nan(1, nKept);
@@ -59,7 +98,7 @@ ADBitVoltsK  = nan(1, nKept);
 
 fprintf('\nFirst pass: scan files, sizes, sampling rates, ADBitVolts\n');
 for i = 1:nKept
-    ch = kept_channels(i);
+    ch    = kept_channels(i);
     fname = fullfile(basePath, sprintf('CSC%d.ncs', ch));
     fileListKept(i) = string(fname);
 
@@ -76,7 +115,7 @@ for i = 1:nKept
             Nlx2MatCSC(fname, FS, EH, EM, []);
 
         % Effective flattened length honoring NValid
-        blkN = size(Samples,1); % 512 rows
+        blkN = size(Samples,1);             % usually 512
         nv   = min(blkN, max(0, NValid(:)'));
         lenArr(i) = sum(nv);
 
@@ -89,9 +128,9 @@ for i = 1:nKept
                 if ~isempty(tok), sfxCh = str2double(tok{1}); end
             end
         end
-        sfxArr[i) = sfxCh; %#ok<*AGROW> (MATLAB editor sometimes warns; this is fine)
+        sfxArr(i) = sfxCh;
 
-        % Parse ADBitVolts (V/AD)
+        % ADBitVolts (V/AD)
         ADBV = NaN;
         k = find(contains(Header,'ADBitVolts','IgnoreCase',true),1,'first');
         if ~isempty(k)
@@ -99,7 +138,7 @@ for i = 1:nKept
             if ~isempty(tok), ADBV = str2double(tok{1}); end
         end
         if ~(isfinite(ADBV) && ADBV>0)
-            ADBV = fallbackADBV; % fallback
+            ADBV = fallbackADBV;
             warning('ADBitVolts missing for CSC%d; using fallback %.12g V/AD', ch, ADBV);
         end
         ADBitVoltsK(i) = ADBV;
@@ -121,22 +160,29 @@ for i = 1:nKept
     catch ME
         warning('Read failure %s (ch %d): %s. Marking bad.', fname, ch, ME.message);
         badch_full(ch) = true;
-        lenArr(i) = 0; headersCell{i} = {}; sfxArr(i) = NaN; ADBitVoltsK(i) = NaN;
+        lenArr(i)      = 0; 
+        headersCell{i} = {}; 
+        sfxArr(i)      = NaN; 
+        ADBitVoltsK(i) = NaN;
     end
 end
 
-% ---- Unified sfx ----
+% ---------- Unified sfx ----------
 good = (lenArr>0) & isfinite(sfxArr) & sfxArr>0;
-if ~any(good), error('No valid channels found / no sampling frequency.'); end
+if ~any(good)
+    error('No valid channels found / no sampling frequency could be determined.');
+end
 sfx = mode(round(sfxArr(good)));
 
-% ---- Prepare disk-backed target ----
+% ---------- Prepare disk-backed target ----------
 maxN = max(lenArr(good));
 bytesPer = strcmpi(storeClass,'single')*4 + strcmpi(storeClass,'double')*8;
 approxGB = (nKept*maxN*bytesPer)/1e9;
 fprintf('\nCreating disk-backed array: %d x %d (%s) ~ %.2f GB on disk\n', nKept, maxN, storeClass, approxGB);
-outFull = fullfile(basePath, outName);
-if exist(outFull, 'file'), delete(outFull); end
+
+if exist(outFull, 'file')
+    delete(outFull); % clean new file
+end
 mf = matfile(outFull, 'Writable', true);
 
 switch lower(storeClass)
@@ -145,26 +191,26 @@ switch lower(storeClass)
     otherwise, error('storeClass must be ''single'' or ''double''.');
 end
 
-% Meta first (so partial files are still informative)
-mf.sfx            = sfx;
-mf.badch          = badch_full;
-mf.chan_labels    = arrayfun(@(k) sprintf('CSC%d', k), 1:nTotalCh, 'UniformOutput', false);
-mf.kept_channels  = kept_channels;
-mf.headersCell    = headersCell;
-mf.units          = 'microvolts';
+% Save meta first so partial files are still useful
+mf.sfx           = sfx;
+mf.badch         = badch_full;
+mf.chan_labels   = arrayfun(@(k) sprintf('CSC%d', k), 1:nTotalCh, 'UniformOutput', false);
+mf.kept_channels = kept_channels;
+mf.headersCell   = headersCell;
+mf.units         = 'microvolts';
 meta.basePath     = basePath;
 meta.createdOn    = datestr(now);
 meta.nTotalCh     = nTotalCh;
 meta.nKept        = nKept;
 meta.reader       = ['Nlx2MatCSC (', mexext, ')'];
 meta.storeClass   = storeClass;
-meta.note         = 'Disk-backed; NaN-padded; PER-CHANNEL AD→µV scaling performed during write.';
+meta.note         = 'Disk-backed; NaN-padded; per-channel AD→µV scaling during write.';
 meta.fileListKept = fileListKept;
-meta.ADBitVolts   = ADBitVoltsK;     % V/AD actually used (with fallbacks resolved)
-meta.scaleFactor  = ADBitVoltsK * 1e6; % µV/AD per channel (vector aligned with kept_channels)
+meta.ADBitVolts   = ADBitVoltsK;           % V/AD used per kept channel
+meta.scaleFactor  = ADBitVoltsK * 1e6;     % µV/AD per kept channel
 mf.meta = meta;
 
-% ---- Second pass: read, flatten with NValid, SCALE to µV, write ----
+% ---------- Second pass: read, flatten (NValid), SCALE to µV, write ----------
 fprintf('\nSecond pass: writing MICROVOLT data to disk (progress below)\n');
 t0 = tic;
 for i = 1:nKept
@@ -177,10 +223,10 @@ for i = 1:nKept
     fname = fullfile(basePath, sprintf('CSC%d.ncs', ch));
     [~, ~, ~, NValid, Samples] = Nlx2MatCSC(fname, [1 1 1 1 1], 0, 1, []); % no header now
 
-    blkN  = size(Samples,1);
-    nRec  = size(Samples,2);
-    x     = nan(1, lenArr(i)); % final effective AD-units length
-    pos   = 1;
+    blkN = size(Samples,1);
+    nRec = size(Samples,2);
+    x    = nan(1, lenArr(i)); % AD units
+    pos  = 1;
     for r = 1:nRec
         nv = min(blkN, max(0, NValid(r)));
         if nv>0
@@ -189,12 +235,10 @@ for i = 1:nKept
         end
     end
 
-    % Scale to µV for THIS channel (per-header factor)
+    % Scale to microvolts for this channel
     sf_uV = ADBitVoltsK(i) * 1e6; % µV/AD
-    if ~(isfinite(sf_uV) && sf_uV>0)
-        sf_uV = fallbackADBV * 1e6;
-    end
-    x = x * sf_uV; % now microvolts
+    if ~(isfinite(sf_uV) && sf_uV>0), sf_uV = fallbackADBV * 1e6; end
+    x = x * sf_uV;
 
     % Cast + write
     switch lower(storeClass)
@@ -211,9 +255,7 @@ for i = 1:nKept
 end
 
 fprintf('\nDone.\nSaved LL-ready (µV) file:\n  %s\n', outFull);
-fprintf('Usage examples:\n');
-fprintf('  m = matfile(''%s''); size(m,''d''), m.units, m.sfx\n', outFull);
-fprintf('  %% LLspikedetector (double math recommended):\n');
-fprintf('  %% [ets, ech] = LLspikedetector(double(m.d), m.sfx, 0.04, 99.9, m.badch);\n');
+fprintf('Quick check:\n  m = matfile(''%s''); size(m,''d''), m.units, m.sfx\n', outFull);
+fprintf('Run LLspikedetector (double math recommended):\n  %% [ets, ech] = LLspikedetector(double(m.d), m.sfx, 0.04, 99.9, m.badch);\n');
 
 end
