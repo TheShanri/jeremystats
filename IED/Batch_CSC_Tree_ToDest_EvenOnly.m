@@ -34,7 +34,7 @@ ip = inputParser;
 ip.addRequired('sheetPath', @(s)ischar(s)||isstring(s));
 ip.addRequired('baseRoot',  @(s)ischar(s)||isstring(s));
 ip.addRequired('destRoot',  @(s)ischar(s)||isstring(s));
-ip.addParameter('Debug', false, @(b)islogical(b)||ismember(b,[0 1]));
+ip.addParameter('Debug', true, @(b)islogical(b)||ismember(b,[0 1]));
 ip.addParameter('TotalChannels', 64, @(x)isnumeric(x)&&isscalar(x)&&x>0);
 ip.addParameter('StoreClass', 'single', @(s)ischar(s)||isstring(s));
 ip.addParameter('ReqsPath', '', @(s)ischar(s)||isstring(s));

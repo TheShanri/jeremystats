@@ -20,7 +20,7 @@
 
 %Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
 
-Batch_CSC_Tree_ToData_EvenOnly("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN")
+BatchConvert_CSC_fromSheet("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN","C:\Users\Z390\Desktop\IED DATA\Converted Data")
 
 
 %% Other workspace
@@ -29,3 +29,12 @@ Batch_CSC_Tree_ToData_EvenOnly("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN"
 %Spectrogram_Waveform_Stacked_FirstEvent("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
 %Pipeline_Main("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
 
+Operands to the logical AND (&&) and OR (||) operators must be convertible to logical scalar values.
+Use the ANY or ALL functions to reduce operands to logical scalar values.
+
+Error in BatchConvert_CSC_fromSheet (line 126)
+        if rep>=1 && rep<=opts.nTotalCh
+
+Error in main (line 23)
+BatchConvert_CSC_fromSheet("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN","C:\Users\Z390\Desktop\IED DATA\Converted Data")
+ 
