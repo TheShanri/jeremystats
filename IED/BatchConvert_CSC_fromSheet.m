@@ -18,6 +18,15 @@ function BatchConvert_CSC_fromSheet(sheetPath, baseRoot, outRoot, varargin)
 %   'dryRun'       (false) don’t write files, just print actions
 %   'verbose'      (true)
 %   'maxDepth'     (Inf)   optional depth limit for directory scanning
+%
+% Example:
+% BatchConvert_CSC_fromSheet( ...
+%   'C:\path\to\samples.xlsx', ...
+%   'D:\NeuralynxRaw', ...
+%   'E:\LL_ready_outputs', ...
+%   'nTotalCh', 64, 'storeClass', 'single', ...
+%   'reqsPath', 'C:\path\to\NeuralynxMex', ...
+%   'dryRun', false, 'verbose', true, 'maxDepth', Inf);
 
 % ---------- Parse args ----------
 ip = inputParser;
@@ -81,15 +90,14 @@ for r = 1:height(T)
     end
 
     % ---------- Find ANY folder whose NAME contains "m<mouseNum>" anywhere ----------
-    % Pattern matches "...m61" NOT followed by another digit (avoids m610)
-    mousePat = sprintf('m0*%d(?!\\d)', mouseNum);
+    mousePat  = sprintf('m0*%d(?!\\d)', mouseNum);
     mouseHits = findDirsNameContainsRegex(baseRoot, mousePat, opts.maxDepth);
     if isempty(mouseHits)
         warning('  m%d not found anywhere under baseRoot.', mouseNum);
         continue;
     end
     % Prefer the shallowest path (closest to baseRoot)
-    depths = cellfun(@(p) count(p, filesep), mouseHits);
+    depths = cellfun(@(p) numel(strfind(p, filesep)), mouseHits);
     [~, ix] = sort(depths, 'ascend');
     mouseHits = mouseHits(ix);
 
@@ -106,8 +114,9 @@ for r = 1:height(T)
     for s = 1:numel(sessHits)
         cscFiles = dir(fullfile(sessHits{s}, '**', 'CSC*.ncs'));
         if ~isempty(cscFiles)
-            recDirs = [recDirs, unique(cellfun(@fileparts, ...
-                fullfile({cscFiles.folder}, {cscFiles.name}), 'UniformOutput', false))]; %#ok<AGROW>
+            parents = unique(cellfun(@fileparts, ...
+                fullfile({cscFiles.folder}, {cscFiles.name}), 'UniformOutput', false));
+            recDirs = [recDirs, parents]; %#ok<AGROW>
         end
     end
     recDirs = unique(recDirs);
@@ -120,12 +129,18 @@ for r = 1:height(T)
     keep = 2:2:opts.nTotalCh;
     badEven = intersect(keep, badList);
     replacements = [];
-    for be = badEven
-        rep = be+1; if rep>opts.nTotalCh, rep = be-1; end
-        keep(keep==be) = [];
-        if rep>=1 && rep<=opts.nTotalCh
+    for k = 1:numel(badEven)
+        be  = badEven(k);
+        rep = be + 1;
+        if rep > opts.nTotalCh, rep = be - 1; end
+        % Remove the bad even
+        keep(keep == be) = [];
+        % Add replacement odd only if it's in range (fix scalar logical issue)
+        if all([rep >= 1, rep <= opts.nTotalCh])
             keep = unique([keep, rep]); %#ok<AGROW>
-            replacements(end+1,:) = [be, rep]; %#ok<AGROW>
+            replacements(end+1, :) = [be, rep]; %#ok<AGROW>
+        else
+            warning('  Cannot replace even ch %d: neighbor out of range.', be);
         end
     end
     if opts.verbose
@@ -137,14 +152,27 @@ for r = 1:height(T)
 
     % ---------- Convert each recording folder; mirror path under outRoot ----------
     for d = 1:numel(recDirs)
-        srcDir = recDirs{d};
+        srcDir  = recDirs{d};
         relPath = pathRelativeTo(srcDir, baseRoot);
-        dstDir = fullfile(outRoot, relPath);
-        if opts.dryRun
-            fprintf('  [dry-run] %s\n           → %s\n', srcDir, dstDir);
+        dstDir  = fullfile(outRoot, relPath);
+
+        % compute the exact output .mat path this folder would produce
+        [~, leaf] = fileparts(srcDir);
+        outFull   = fullfile(dstDir, sprintf('LL_input_%s_uV.mat', leaf));
+
+        % If already processed, report and skip
+        if exist(outFull, 'file')
+            fprintf('  Skipping (already processed): %s\n             → %s\n', srcDir, outFull);
             continue;
         end
-        mkdir(dstDir);
+
+        if ~isfolder(dstDir), mkdir(dstDir); end
+
+        if opts.dryRun
+            fprintf('  [dry-run] %s\n           → %s\n', srcDir, outFull);
+            continue;
+        end
+
         try
             convertFolderToLL_uV(srcDir, dstDir, keep, opts);
         catch ME
@@ -186,16 +214,25 @@ end
 
 % ===== Helper: relative path from root to path (case-insensitive) =====
 function rel = pathRelativeTo(p, root)
-    p    = char(java.io.File(p   ).getCanonicalPath());
-    root = char(java.io.File(root).getCanonicalPath());
-    if strncmpi(p, [root filesep], length(root)+1)
-        rel = p(length(root)+2:end);
-    elseif strcmpi(p, root)
+    % Canonicalize (case-insensitive handling on Windows/macOS)
+    pObj    = java.io.File(p);
+    rootObj = java.io.File(root);
+    try
+        pCan    = char(pObj.getCanonicalPath());
+        rootCan = char(rootObj.getCanonicalPath());
+    catch
+        pCan    = char(pObj.getAbsolutePath());
+        rootCan = char(rootObj.getAbsolutePath());
+    end
+    if strncmpi(pCan, [rootCan filesep], length(rootCan)+1)
+        rel = pCan(length(rootCan)+2:end);
+    elseif strcmpi(pCan, rootCan)
         rel = '';
     else
-        % Fallback: attempt anchored removal
-        rel = regexprep(p, ['^', regexptranslate('escape', [root filesep])], '', 'ignorecase');
-        if strcmp(rel, p), rel = p; end
+        % Fallback: anchored removal
+        pat = ['^', regexptranslate('escape', [rootCan filesep])];
+        rel = regexprep(pCan, pat, '', 'ignorecase');
+        if strcmp(rel, pCan), rel = pCan; end
     end
 end
 
@@ -213,7 +250,13 @@ function convertFolderToLL_uV(basePath, outDir, keep, opts)
     end
 
     [~, leaf] = fileparts(basePath);
-    outFull = fullfile(outDir, sprintf('LL_input_%s_uV.mat', leaf));
+    outFull   = fullfile(outDir, sprintf('LL_input_%s_uV.mat', leaf));
+
+    % Defensive skip inside converter too
+    if exist(outFull, 'file')
+        fprintf('    Skipping (already exists): %s\n', outFull);
+        return;
+    end
 
     nTotalCh     = opts.nTotalCh;
     storeClass   = char(opts.storeClass);
@@ -307,7 +350,10 @@ function convertFolderToLL_uV(basePath, outDir, keep, opts)
 
     % ----- Disk-backed target -----
     maxN = max(lenArr(good));
-    if exist(outFull,'file'), delete(outFull); end
+    if exist(outFull,'file')
+        fprintf('    Skipping (already exists): %s\n', outFull);
+        return;
+    end
     mf = matfile(outFull,'Writable',true);
     switch lower(storeClass)
         case 'single', mf.d = single(NaN(nKept, maxN));
