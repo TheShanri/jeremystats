@@ -1,26 +1,15 @@
 function RunLLspikedetector_Folder(rootDir, varargin)
 % RunLLspikedetector_Folder
-% Batch-run LLspikedetector on converted, disk-backed MAT files (LL_input_*_uV.mat),
-% flipping polarity first (multiply by -1), and save outputs next to each input.
+% Batch-run LLspikedetector on LL_input_*_uV.mat files (recursively).
+% - Flips polarity (multiply by -1) before detection
+% - Loads as SINGLE by default to halve memory
+% - Checks/sets path to LLspikedetector via 'llPath'
+% - Skips files that already have outputs
 %
 % Usage:
-%   RunLLspikedetector_Folder('E:\LL_ready_outputs')
-%   RunLLspikedetector_Folder('E:\LL_ready_outputs', 'llw_sec',0.040,'prc_thr',99.9)
-%
-% Options (Name,Value):
-%   'pattern'       : file pattern to match (default 'LL_input_*_uV.mat')
-%   'recurse'       : logical (default true) → search subfolders
-%   'llw_sec'       : line-length window (sec), default 0.040
-%   'prc_thr'       : percentile threshold, default 99.9
-%   'polarityFlip'  : logical (default true) → multiply data by -1 before detect
-%   'skipIfExists'  : logical (default true) → if *any* prior LLspikes output exists, skip
-%   'verbose'       : logical (default true)
-%
-% Assumes each input MAT contains:
-%   - d              : [rows x samples] (disk-backed ok)
-%   - sfx            : sampling frequency (Hz)
-%   - badch          : logical(1, nTotalCh) in original indexing (optional but recommended)
-%   - kept_channels  : row→original-channel mapping (optional; falls back to 1:nRows)
+%   RunLLspikedetector_Folder('E:\LL_ready_outputs', ...
+%       'llPath','C:\path\to\LLspike', 'precision','single', ...
+%       'llw_sec',0.040,'prc_thr',99.9);
 
 % ------------------ parse args ------------------
 ip = inputParser;
@@ -31,13 +20,24 @@ ip.addParameter('llw_sec', 0.040, @(x)isfinite(x)&&x>0);
 ip.addParameter('prc_thr', 99.9,  @(x)isfinite(x)&&x>0&&x<100);
 ip.addParameter('polarityFlip', true, @(x)islogical(x)||ismember(x,[0 1]));
 ip.addParameter('skipIfExists', true, @(x)islogical(x)||ismember(x,[0 1]));
+ip.addParameter('precision','single', @(s) any(strcmpi(s,{'single','double'})));
+ip.addParameter('llPath','', @(s)ischar(s)||isstring(s));      % Folder that contains LLspikedetector
 ip.addParameter('verbose', true, @(x)islogical(x)||ismember(x,[0 1]));
+ip.addParameter('chunkCols', 2e6, @(x)isfinite(x)&&x>=1);      % columns per chunk when reading from matfile
 ip.parse(rootDir, varargin{:});
 opts = ip.Results;
 rootDir = char(rootDir);
 
-if ~isfolder(rootDir)
-    error('Folder not found: %s', rootDir);
+if ~isfolder(rootDir), error('Folder not found: %s', rootDir); end
+
+% ------------------ ensure LLspikedetector on path ------------------
+if ~isempty(opts.llPath) && isfolder(opts.llPath)
+    addpath(char(opts.llPath));
+end
+if exist('LLspikedetector','file') ~= 2 && exist('LLspikedetector','file') ~= 3
+    error(['LLspikedetector not found on MATLAB path.\n' ...
+           'Provide its folder via the ''llPath'' argument, e.g.:\n' ...
+           '  RunLLspikedetector_Folder(''%s'',''llPath'',''C:\\path\\to\\LLspikedetector'')'], rootDir);
 end
 
 % ------------------ discover inputs ------------------
@@ -46,6 +46,8 @@ if opts.recurse
 else
     files = dir(fullfile(rootDir, opts.pattern));
 end
+files = files(:);
+
 if isempty(files)
     fprintf('No files matching "%s" under: %s\n', opts.pattern, rootDir);
     return;
@@ -58,7 +60,7 @@ for k = 1:numel(files)
     inMat = fullfile(files(k).folder, files(k).name);
     [inDir, baseName, ~] = fileparts(inMat);
 
-    % If skip is enabled and any existing output is present, skip
+    % Skip if outputs already present
     if opts.skipIfExists
         prior = [dir(fullfile(inDir, sprintf('%s_LLspikes_*.mat', baseName))); ...
                  dir(fullfile(inDir, sprintf('%s_LLspikes_*.csv', baseName)))];
@@ -69,7 +71,7 @@ for k = 1:numel(files)
     end
 
     try
-        run_one(inMat, opts);
+        run_one(inMat, opts, k, numel(files));
     catch ME
         warning('[%3d/%3d] Failed: %s\n  -> %s', k, numel(files), inMat, ME.message);
     end
@@ -79,9 +81,10 @@ fprintf('Done.\n');
 
 end % === main ===
 
+
 % ======================= helpers =======================
 
-function run_one(inMat, opts)
+function run_one(inMat, opts, idx, nTotal)
 tAll = tic;
 
 if opts.verbose
@@ -93,24 +96,16 @@ mf = matfile(inMat);
 
 % Verify & load metadata
 vars = who(mf);
-needD   = any(strcmp(vars,'d'));
-needSfx = any(strcmp(vars,'sfx'));
-if ~needD || ~needSfx
+if ~any(strcmp(vars,'d')) || ~any(strcmp(vars,'sfx'))
     error('Input missing required vars (need at least d and sfx).');
 end
-
 sfx = mf.sfx;
+
 % badch (optional)
-if any(strcmp(vars,'badch'))
-    badch_full = mf.badch;
-else
-    badch_full = [];
-end
+if any(strcmp(vars,'badch')), badch_full = mf.badch; else, badch_full = []; end
 % kept_channels (optional)
-if any(strcmp(vars,'kept_channels'))
-    kept_channels = mf.kept_channels;
-else
-    kept_channels = 1:size(mf,'d',1);
+if any(strcmp(vars,'kept_channels')), kept_channels = mf.kept_channels;
+else, kept_channels = 1:size(mf,'d',1);
 end
 
 nRows = size(mf, 'd', 1);
@@ -126,7 +121,7 @@ if opts.verbose
     fprintf('Rows map to original channels: %s\n', mat2str(kept_channels));
 end
 
-% Build badch aligned to data rows
+% Build row-aligned bad-channel mask
 badch_rows = false(1, nRows);
 if ~isempty(badch_full) && numel(badch_full) >= max(kept_channels)
     for i = 1:nRows
@@ -134,34 +129,78 @@ if ~isempty(badch_full) && numel(badch_full) >= max(kept_channels)
     end
 end
 
-% Read data into memory (double) and flip polarity if requested
-if opts.verbose
-    fprintf('  Loading data into RAM as double%s...\n', tern(opts.polarityFlip,' (will flip)',''));
+% -------- Preflight memory check + chunked read as SINGLE by default --------
+wantSingle = strcmpi(opts.precision,'single');
+bytesPer   = 4*(wantSingle) + 8*(~wantSingle);
+needBytes  = double(nRows) * double(nCol) * bytesPer;
+
+maxBytes = NaN;
+if ispc && exist('memory','file')==2
+    try
+        mem = memory;
+        maxBytes = mem.MaxPossibleArrayBytes;
+    catch
+        maxBytes = NaN;
+    end
 end
+
+if ~isnan(maxBytes) && needBytes > maxBytes
+    % Try to salvage by switching to single if user asked for double
+    if ~wantSingle
+        fprintf('  Preflight: double would need %.1f GB > max %.1f GB. Retrying with single.\n', needBytes/1e9, maxBytes/1e9);
+        wantSingle = true;
+        bytesPer   = 4;
+        needBytes  = double(nRows) * double(nCol) * bytesPer;
+    end
+end
+
+if ~isnan(maxBytes) && needBytes > maxBytes
+    errMsg = sprintf( ...
+        'Requested %dx%d (%.1fGB %s) exceeds MaxPossibleArrayBytes (%.1fGB). Consider processing fewer channels/time.', ...
+        nRows, nCol, needBytes/1e9, tern(wantSingle,'single','double'), maxBytes/1e9);
+    error(errMsg);
+end
+
 
 % Make LLspikedetector temp files land beside input
 [inDir, baseName, ~] = fileparts(inMat);
-oldCWD = pwd;
-cd(inDir);
-cleanupObj = onCleanup(@() cd(oldCWD));
+oldCWD = pwd; cd(inDir);
+cleanupCWD = onCleanup(@() cd(oldCWD));
 
-d = double(mf.d(:,:));
-if opts.polarityFlip
-    d = -d;
+% Allocate output array in desired precision and fill in chunks
+if wantSingle
+    d = zeros(nRows, nCol, 'single');
+else
+    d = zeros(nRows, nCol, 'double');
 end
 
-% Run LLspikedetector
+if opts.verbose
+    fprintf('  Loading data into RAM as %s%s...\n', class(d), tern(opts.polarityFlip,' (will flip)',''));
+end
+
+col = 1;
+chunkCols = min(nCol, round(opts.chunkCols));
+while col <= nCol
+    j1 = min(nCol, col + chunkCols - 1);
+    block = mf.d(:, col:j1);           % read as stored type (likely single)
+    if opts.polarityFlip, block = -block; end
+    if wantSingle && ~isa(block,'single'), block = single(block); end
+    if ~wantSingle && ~isa(block,'double'), block = double(block); end
+    d(:, col:j1) = block;
+    col = j1 + 1;
+end
+
+% -------- Run LLspikedetector --------
 if opts.verbose
     fprintf('  Running LLspikedetector (llw=%.3f s, prc=%.3f)...\n', opts.llw_sec, opts.prc_thr);
 end
 [ets, ech] = LLspikedetector(d, sfx, opts.llw_sec, opts.prc_thr, badch_rows);
 
-% Convert indices to seconds
+% -------- Summaries --------
 t_on  = ets(:,1) ./ sfx;
 t_off = ets(:,2) ./ sfx;
 dur_s = t_off - t_on;
 
-% Human-readable channel lists (original channel numbers)
 chan_list = cell(size(ech,1),1);
 for k = 1:size(ech,1)
     active_rows = find(ech(k,:));
@@ -169,11 +208,10 @@ for k = 1:size(ech,1)
                                     active_rows, 'UniformOutput', false), ',');
 end
 
-% Assemble table
 T = table(ets(:,1), ets(:,2), t_on, t_off, dur_s, chan_list, ...
           'VariableNames', {'on_samp','off_samp','on_sec','off_sec','duration_sec','channels'});
 
-% Save outputs next to input
+% -------- Save outputs next to input --------
 stamp  = datestr(now, 'yyyymmdd_HHMMSS');
 flipTag = tern(opts.polarityFlip, '_flip','');
 outMat = fullfile(inDir, sprintf('%s_LLspikes%s_%s.mat', baseName, flipTag, stamp));
@@ -185,6 +223,7 @@ params.sfx           = sfx;
 params.kept_channels = kept_channels;
 params.badch_rows    = badch_rows;
 params.polarityFlip  = logical(opts.polarityFlip);
+params.precision     = class(d);
 params.sourceMat     = inMat;
 
 save(outMat, 'ets', 'ech', 'T', 'params', '-v7.3');
@@ -199,7 +238,7 @@ end
 cleanup_LLtemps(inDir);
 
 if opts.verbose
-    fprintf('  Done in %s.\n', duration(0,0,toc(tAll),"Format","mm:ss"));
+    fprintf('  [%d/%d] Done in %s.\n', idx, nTotal, duration(0,0,toc(tAll),"Format","mm:ss"));
 end
 end
 
@@ -209,10 +248,15 @@ cand = {'d.mat','L.mat','Lvec.mat','eON.mat','eOFF.mat'};
 for i = 1:numel(cand)
     f = fullfile(dirPath, cand{i});
     if exist(f, 'file')
-        try, delete(f); catch, end
+        try
+            delete(f);
+        catch
+            % ignore
+        end
     end
 end
 end
+
 
 function out = tern(cond, a, b)
 % tiny ternary helper
