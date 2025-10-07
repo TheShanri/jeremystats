@@ -7,9 +7,9 @@ function vacc_ied_detect()
 
   % Add required deps (LLspikedetector.m, Nlx2MatCSC.m/.mexa64)
   addpath(baseDir);
-  addpath(fullfile(baseDir, 'reqsPath'));  % contains Nlx2MatCSC.* per repo layout
+  addpath(fullfile("C:\Users\Z390\Desktop\jeremystats\IED\reqsPath"));  % contains Nlx2MatCSC.* per repo layout
 
-  files = dir(fullfile(dataDir, 'CSC*.ncs'));
+  files = dir(fullfile("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26", 'CSC*.ncs'));
   if isempty(files)
     error('No .ncs files found in: %s', dataDir);
   end
