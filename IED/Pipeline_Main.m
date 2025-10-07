@@ -3,7 +3,7 @@ function Pipeline_Main(inputFolder, dataMatPath, varargin)
 % (SOLID & SPUTTER) at native resolution, plus a merged stats CSV.
 %
 % Triptych columns (left → center → right):
-%   LEFT  : [VoltageRaster_EventsAvg, CSD_CenterSlices_Waveform_AvgGroups]  (stacked vertically)
+%   LEFT  : [VoltageRaster_EventsAvg, CSD_CenterSlices_Waveform_AvgGroups, Spectrogram_Waveform_Stacked_ThirdEvent]  (stacked vertically)
 %   CENTER: [EventStacks_ampWidth_Avg]  (the long one)
 %   RIGHT : [CSDRaster_Avg, CSD_TimeAvgSlices_Waveforms_AvgGroups]          (stacked vertically)
 %
@@ -15,13 +15,6 @@ if ~exist(masterOutDir, 'dir'), mkdir(masterOutDir); end
 triptychSOLID   = fullfile(masterOutDir, 'Master_Compact_SOLID.png');
 triptychSPUTTER = fullfile(masterOutDir, 'Master_Compact_SPUTTER.png');
 masterCSV       = fullfile(masterOutDir, 'Master_Stats.csv');
-
-% ---------- 0) (optional) spike detection placeholder ----------
-% try
-%     SpikeDetect_Pipeline(inputFolder, dataMatPath, varargin{:});
-% catch ME
-%     warning(ME.identifier, 'SpikeDetect_Pipeline failed: %s', ME.message);
-% end
 
 % ---------- 1) EventStacks (CENTER) ----------
 evtStacksRes = [];
@@ -63,11 +56,20 @@ catch ME
     warning(ME.identifier, 'CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline failed: %s', ME.message);
 end
 
+% ---------- 6) Spectrogram + Waveform (LEFT, bottom) ----------
+spec3rdRes = [];
+try
+    spec3rdRes = Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline(inputFolder, dataMatPath, varargin{:});
+catch ME
+    warning(ME.identifier, 'Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline failed: %s', ME.message);
+end
+
 % ---------- Build SOLID triptych ----------
 try
     colLeft_SOL = stackVerticalHiRes({ ...
         getFileIfExists(getFieldSafe(voltRasterRes,'pngSolid')), ...
-        getFileIfExists(getFieldSafe(csdSlicesRes,'pngSolid'))}, 6);
+        getFileIfExists(getFieldSafe(csdSlicesRes,'pngSolid')), ...
+        getFileIfExists(getFieldSafe(spec3rdRes, 'pngSolid'))}, 6);   % spectrogram at bottom-left
     colCtr_SOL  = getFileIfExists(getFieldSafe(evtStacksRes,'pngSolid'));
     colRight_SOL= stackVerticalHiRes({ ...
         getFileIfExists(getFieldSafe(csdRasterRes,'pngSolid')), ...
@@ -88,7 +90,8 @@ end
 try
     colLeft_SPU = stackVerticalHiRes({ ...
         getFileIfExists(getFieldSafe(voltRasterRes,'pngSputter')), ...
-        getFileIfExists(getFieldSafe(csdSlicesRes,'pngSputter'))}, 6);
+        getFileIfExists(getFieldSafe(csdSlicesRes,'pngSputter')), ...
+        getFileIfExists(getFieldSafe(spec3rdRes, 'pngSputter'))}, 6);
     colCtr_SPU  = getFileIfExists(getFieldSafe(evtStacksRes,'pngSputter'));
     colRight_SPU= stackVerticalHiRes({ ...
         getFileIfExists(getFieldSafe(csdRasterRes,'pngSputter')), ...
@@ -112,6 +115,7 @@ T = tryAddCSV(T, voltRasterRes, 'VoltageRaster');
 T = tryAddCSV(T, csdRasterRes,  'CSDRaster');
 T = tryAddCSV(T, csdSlicesRes,  'CSDCenterSlices');
 T = tryAddCSV(T, csdTimeAvgRes, 'CSDTimeAvg');
+% (Spectrogram block has no CSV)
 
 try
     if isempty(T)
@@ -154,7 +158,6 @@ end
 function outPath = stackVerticalHiRes(pngList, sep)
 % Returns a path to a temp PNG that is a vertical stack of the inputs at native res.
 % If zero or one valid png in list, returns [] or that single path as-is.
-
 pngList = pngList(~cellfun(@isempty, pngList));
 if isempty(pngList)
     outPath = [];
@@ -208,9 +211,7 @@ imwrite(out, outPath);
 end
 
 function composeColumnsHiRes(columnImgs, outPath, colSep)
-% columnImgs: cell array of image file paths (each path is either a single plot
-% or a pre-composed vertical stack). Compose LEFT→RIGHT at native res, no resampling.
-
+% Compose LEFT→RIGHT at native res, no resampling.
 assert(~isempty(columnImgs), 'composeColumnsHiRes: no columns to compose.');
 
 % read columns
@@ -281,7 +282,11 @@ end
 function T = addMissingVars(T, allVars)
 missing = setdiff(allVars, T.Properties.VariableNames, 'stable');
 for k = 1:numel(missing)
-    T.(missing{k}) = missing;
+    T.(missing{k}) = missingDefault();
 end
 T = T(:, allVars);
+end
+
+function x = missingDefault()
+x = missing;
 end
