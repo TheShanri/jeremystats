@@ -24,11 +24,16 @@ function vacc_ied_detect_per_channel()
     error('No .ncs files found in: %s', recDir);
   end
 
-  % Keep even-numbered CSC files
-  names = {files.name};
-  nums  = cellfun(@(s) sscanf(s,'CSC%d.ncs'), names);
-  keep  = mod(nums,2)==0 & ~isnan(nums);
-  files = files(keep);
+
+  % Keep even-numbered CSC files and sort numerically (CSC2 < CSC10)
+names = {files.name};
+nums  = cellfun(@(s) sscanf(s,'CSC%d.ncs'), names);
+keep  = mod(nums,2)==0 & ~isnan(nums);
+files = files(keep);
+nums  = nums(keep);
+[~,idx] = sort(nums,'ascend');   % <-- numeric sort
+files = files(idx);
+
   if isempty(files)
     error('No even-numbered CSC*.ncs files found in: %s', recDir);
   end
