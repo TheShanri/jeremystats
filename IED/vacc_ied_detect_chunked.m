@@ -12,14 +12,22 @@ function vacc_ied_detect_chunked()
   fprintf('[setup] Added deps.\n');
 
   % --- data discovery (even-numbered CSC*.ncs) ---
-  dataRoot = "D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26";
-  files = dir(fullfile(dataRoot, 'CSC*.ncs'));
-  if isempty(files), error('No .ncs files found in: %s', dataRoot); end
-  nums  = cellfun(@(s) sscanf(s,'CSC%d.ncs'), {files.name});
-  keep  = mod(nums,2)==0 & ~isnan(nums);
-  files = files(keep);
-  if isempty(files), error('No even-numbered CSC files in: %s', dataRoot); end
-  fprintf('[discovery] Found %d even-numbered channels.\n', numel(files));
+dataRoot = "D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26";
+files = dir(fullfile(dataRoot, 'CSC*.ncs'));
+if isempty(files), error('No .ncs files found in: %s', dataRoot); end
+
+% Parse numeric channel ids
+nums = cellfun(@(s) sscanf(s,'CSC%d.ncs'), {files.name});
+
+% Keep evens, then sort numerically (2,4,6,...,10,12,...)
+keep  = mod(nums,2)==0 & ~isnan(nums);
+files = files(keep);
+nums  = nums(keep);
+[nums, order] = sort(nums, 'ascend');
+files = files(order);
+
+if isempty(files), error('No even-numbered CSC files in: %s', dataRoot); end
+fprintf('[discovery] Found %d even-numbered channels: %s\n', numel(nums), mat2str(nums));
 
   % --- params ---
   sfx = 30000;     % Hz
