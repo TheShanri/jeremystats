@@ -18,7 +18,7 @@ if isempty(files), error('No .ncs files found in: %s', dataRoot); end
 
 % Parse numeric channel ids
 nums = cellfun(@(s) sscanf(s,'CSC%d.ncs'), {files.name});
-
+%2
 % Keep evens, then sort numerically (2,4,6,...,10,12,...)
 keep  = mod(nums,2)==0 & ~isnan(nums);
 files = files(keep);
