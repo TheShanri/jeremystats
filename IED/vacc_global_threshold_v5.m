@@ -112,7 +112,8 @@ maxBin = 65536; chunk = 5e6;
 
 iter = 1;
 while true
-    if ~isfinite(lo) || !isfinite(hi) || lo==hi
+    % FIXED: use ~ (not) instead of !
+    if ~isfinite(lo) || ~isfinite(hi) || lo==hi
         v = lo; return;
     end
 
@@ -120,7 +121,7 @@ while true
 
     nb    = min(maxBin, max(256, ceil(sqrt(double(N)))));
     edges = linspace(lo, hi, nb+1);
-    cnt   = zeros(1, nb);   % double is fine
+    cnt   = zeros(1, nb);
 
     % ---- count pass ----
     fid = fopen(binPath,'r'); assert(fid>0);
@@ -140,22 +141,22 @@ while true
     fprintf('    Bin %d contains target (count=%g)\n', b, cnt(b));
     fprintf('    Refining to [%.4g, %.4g]\n', binLo, binHi);
 
-    % ---- if bin collapsed to a point, we're done ----
+    % Degenerate bin → exact value
     if binHi == binLo
-        v = binLo; 
+        v = binLo;
         fprintf('    Bin is a single value; percentile = %.6g\n', v);
         return;
     end
 
     % ---- collect only values in target bin ----
-    pool = zeros(0,1);  % column vector to avoid horzcat mismatch
+    pool = zeros(0,1);  % column to avoid horzcat mismatch
     fid = fopen(binPath,'r'); assert(fid>0);
     while true
-        buf = fread(fid, chunk, 'single=>double'); 
+        buf = fread(fid, chunk, 'single=>double');
         if isempty(buf), break; end
         mask = (buf>=binLo & buf<binHi) | (binHi==hi & buf==hi);
         if any(mask)
-            pool = [pool; buf(mask)]; %#ok<AGROW>  % vertical concat
+            pool = [pool; buf(mask)]; %#ok<AGROW>
         end
     end
     fclose(fid);
