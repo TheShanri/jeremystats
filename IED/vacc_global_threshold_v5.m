@@ -104,7 +104,7 @@ fprintf('Saved: %s\n', outPath);
 fprintf('===============================================\n\n');
 end
 
-% ---------- Helper: percentile from disk ----------
+% ---------- Helper: percentile from disk -----------
 function v = exact_percentile_from_disk(binPath, N, prc, vmin, vmax)
 k = max(1, min(double(N), round(prc/100 * double(N))));
 lo = vmin; hi = vmax;
