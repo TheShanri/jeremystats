@@ -31,12 +31,4 @@ TheVision_fromCSV("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26","C:\User
 %vacc_ied_detect_chunked_thr(186565)
 
 
-main
-[info] sfx = 30000 Hz (from CSC2.ncs)
-[info] sfx = 30000 Hz (from CSC2.ncs)
-No events within 6–8 channels.
-main
-[info] sfx = 30000 Hz (from CSC2.ncs)
-[info] sfx = 30000 Hz (from CSC2.ncs)
-No events within 6–8 channels.
 

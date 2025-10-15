@@ -1,27 +1,13 @@
 function TheVision_fromCSV(recDir, csvPath, varargin)
-% TheVision_fromCSV
-% Plot per-event multi-channel stacks from Neuralynx CSC*.ncs using ONLY
-% the windows listed in events_summary.csv (no full conversion).
+% Plot per-event multi-channel stacks using ONLY windows listed in CSV.
+% Supports two CSV formats:
+%  A) 'channels' = "2,4,8"; OR
+%  B) 'channels' = numeric count, with extra columns (e.g. 'Unnamed: 5'..)
+%     holding actual CSC numbers per event row.
 %
-% Inputs:
-%   recDir   : folder containing CSC*.ncs (even channels as in your pipeline)
-%   csvPath  : events_summary.csv (cols: sample_start,sample_end,time_start_s,time_end_s,channels)
-%
-% Name-Value options (defaults match your prior TheVision):
-%   'halfWidthMs'    (double) default 30e-3   % 30 ms half-window
-%   'align'          ('midpoint'|'peak') default 'midpoint'
-%   'peakPolarity'   ('abs'|'pos'|'neg') default 'abs'
-%   'scaleToMicroV'  (double) default 1       % multiply AD counts -> µV
-%   'scaleToMV'      (double) default []      % DEPRECATED; overrides scaleToMicroV = *1000
-%   'saveDir'        (string/char) default: recDir
-%   'minCh'          (int) default 6          % filter by #active channels (inclusive)
-%   'maxCh'          (int) default 8
-%
-% Notes:
-% - Determines sample rate (sfx) from the first CSC via Nlx2MatCSC.
-% - Uses record-index extraction (mode=2) and trims to exact sample range.
-% - Active channels parsed from CSV "channels" column (list of CSC numbers).
-% - Plots ALL available even CSCs in one column; active channels are bold.
+% Name-Value:
+%   'halfWidthMs', 'align', 'peakPolarity', 'scaleToMicroV','scaleToMV',
+%   'saveDir', 'minCh', 'maxCh' (defaults match previous version)
 
 % ---------- Parse ----------
 p = inputParser;
@@ -50,10 +36,8 @@ maxCh         = p.Results.maxCh;
 
 if ~isempty(scaleToMV)
     scaleToMicroV = scaleToMV * 1000; % mV -> µV
-    warning('TheVision:DeprecatedArg', ...
-        '''scaleToMV'' is deprecated. Using scaleToMicroV = %g (mV*1000).', scaleToMicroV);
+    warning('TheVision:DeprecatedArg', '''scaleToMV'' deprecated. Using scaleToMicroV=%g.', scaleToMicroV);
 end
-
 if ~isfile(csvPath), error('CSV not found: %s', csvPath); end
 
 % ---------- Discover CSC files (even channels, sorted) ----------
@@ -63,39 +47,88 @@ nums  = cellfun(@(s) sscanf(s,'CSC%d.ncs'), {files.name});
 keep  = mod(nums,2)==0 & ~isnan(nums);
 files = files(keep); nums = nums(keep);
 [nums,ix] = sort(nums,'ascend'); files=files(ix);
-
-% Map: row index -> CSC number and filename
 cscNums = nums(:)'; nChan = numel(cscNums);
 
 % ---------- Determine sample rate from first file ----------
-% Nlx2MatCSC(File,[TS,Ch,Fs,NValid,Samples],HdrFlag,ExtractMode,Vector)
 FsVec = Nlx2MatCSC(fullfile(files(1).folder, files(1).name), [0 0 1 0 0], 0, 1, []);
-if isempty(FsVec)
-    error('Could not read sampling frequency from %s', files(1).name);
-end
-sfx = double(FsVec(1));
-fprintf('[info] sfx = %g Hz (from %s)\n', sfx, files(1).name);
-
-if isempty(FsVec), error('Could not read sampling frequency from first CSC.'); end
+if isempty(FsVec), error('Could not read sampling frequency from %s', files(1).name); end
 sfx = double(FsVec(1));
 fprintf('[info] sfx = %g Hz (from %s)\n', sfx, files(1).name);
 
 % ---------- Load CSV ----------
 T = readtable(csvPath, 'TextType', 'string');
-needCols = {'sample_start','sample_end','channels'};
+needCols = {'sample_start','sample_end'};
 for c = needCols
-    if ~ismember(c{1}, T.Properties.VariableNames)
+    if ~isfield(T, c{1}) && ~ismember(c{1}, T.Properties.VariableNames)
         error('CSV missing required column: %s', c{1});
     end
 end
 sample_start = double(T.sample_start);
 sample_end   = double(T.sample_end);
-chanStrs     = string(T.channels);
 
-% filter by active channel count (minCh..maxCh)
-actCounts = arrayfun(@(i) numel(str2num_safe(chanStrs(i))), (1:height(T))'); %#ok<ST2NM>
-keepEvt   = (actCounts>=minCh) & (actCounts<=maxCh);
-evtIdx    = find(keepEvt);
+% Identify "channels list" layout:
+hasChanCol = ismember('channels', T.Properties.VariableNames);
+chanIsStringList = false;
+chanIsNumericWithExtras = false;
+
+if hasChanCol
+    % If channels is string (non-numeric) → list format
+    if iscellstr(cellstr(T.channels)) || isstring(T.channels)
+        % Detect if any row contains comma or space-separated numbers
+        ex = T.channels( find(T.channels~="", 1, 'first') );
+        if ~isempty(ex)
+            % If it's purely numeric like "36" *without* separators,
+            % treat as NOT a list.
+            chanIsStringList = contains(ex, ",") || contains(ex, " ") || contains(ex, ";");
+        end
+    end
+end
+
+% Gather extra columns that likely hold channel IDs per row (numeric)
+extraCols = T.Properties.VariableNames(~ismember(T.Properties.VariableNames, ...
+    {'sample_start','sample_end','time_start_s','time_end_s','channels'}));
+% Keep only those whose values look numeric
+extraCols = extraCols( arrayfun(@(k) isnumeric(T.(extraCols{k})), 1:numel(extraCols)) );
+
+% If channels not a string list, and we have extra numeric columns → numeric+extras format
+if ~chanIsStringList && ~isempty(extraCols)
+    chanIsNumericWithExtras = true;
+end
+
+% Function to get active CSC list for a row:
+    function v = get_active_list(row)
+        if chanIsStringList
+            v = str2num_list(T.channels(row)); %#ok<ST2NM>
+        elseif chanIsNumericWithExtras
+            % concatenate numeric non-NaN entries across extraCols
+            tmp = [];
+            for cc = 1:numel(extraCols)
+                val = T.(extraCols{cc})(row);
+                if ~isnan(val), tmp(end+1) = double(val); end %#ok<AGROW>
+            end
+            v = unique(tmp); % CSC numbers
+        else
+            % Fallback: if channels is numeric but no extra columns, treat
+            % as single channel id (unlikely, but prevents crash)
+            if hasChanCol && ~isnan(double(T.channels(row)))
+                v = double(T.channels(row));
+            else
+                v = [];
+            end
+        end
+        % Filter to those we actually have on disk (even CSCs)
+        if ~isempty(v)
+            v = v(ismember(v, cscNums));
+        end
+    end
+
+% Filter events by active channel count
+actCounts = zeros(height(T),1);
+for i=1:height(T)
+    actCounts(i) = numel(get_active_list(i));
+end
+keepEvt = (actCounts>=minCh) & (actCounts<=maxCh);
+evtIdx  = find(keepEvt);
 
 if isempty(evtIdx)
     fprintf('No events within %d–%d channels.\n', minCh, maxCh);
@@ -109,7 +142,7 @@ fprintf('[info] will save PNGs to: %s\n', outDir);
 
 % ---------- Constants ----------
 HW   = max(1, round(halfWidthMs * sfx));
-REC  = 512; % Neuralynx CSC block size (samples per record)
+REC  = 512; % CSC block size
 
 % ---------- Iterate events ----------
 for eii = 1:numel(evtIdx)
@@ -118,22 +151,19 @@ for eii = 1:numel(evtIdx)
     evE = sample_end(e);
     if evE <= evS, fprintf('Evt %d skipped (empty window)\n', e); continue; end
 
-    % Active CSC numbers for this event (from CSV)
-    activeList = str2num_safe(chanStrs(e));        % vector of CSC numbers (e.g., [2 6 8 ...])
+    activeList = get_active_list(e);             % vector of CSC numbers
     activeMaskCSC = ismember(cscNums, activeList);  % 1 x nChan
 
     % Choose anchor
     switch alignMode
         case "midpoint"
             anchor = round((evS + evE)/2);
-            s0 = anchor - HW; s1 = anchor + HW;
-            if s0 < 1, s0=1; end
-        otherwise % 'peak' — per-channel peak within [evS..evE]
-            s0 = evS; s1 = evE; % we’ll refine per channel below
+            s0 = max(1, anchor - HW); s1 = anchor + HW;
+        otherwise % 'peak' per-channel
+            s0 = evS; s1 = evE; % refine per-channel
     end
 
-    % ---------- Read window data from each CSC (only necessary records) ----------
-    % Prepare container
+    % Read window per CSC
     if alignMode=="midpoint"
         winLen = s1 - s0 + 1;
         Y = nan(nChan, winLen, 'double');
@@ -148,21 +178,18 @@ for eii = 1:numel(evtIdx)
         if isempty(usedIdx)
             fprintf('Evt %d: no valid channels, skip.\n', e); continue;
         end
-
-    else % align == 'peak' (per-channel)
+    else % per-channel peak
         rows = {}; usedIdx = [];
         for k = 1:nChan
             yRaw = read_csc_samples(files(k), evS, evE, REC);
             if isempty(yRaw), continue; end
-            % pick peak index in event window
             switch peakPolarity
                 case 'pos', [~,kp] = max(yRaw);
                 case 'neg', [~,kp] = min(yRaw);
                 otherwise,  [~,kp] = max(abs(yRaw));
             end
             a = evS + kp - 1;
-            s0k = a - HW; s1k = a + HW;
-            if s0k < 1, s0k = 1; end
+            s0k = max(1, a - HW); s1k = a + HW;
             yWin = read_csc_samples(files(k), s0k, s1k, REC);
             if numel(yWin) ~= (s1k - s0k + 1), continue; end
             rows{end+1} = double(yWin) * scaleToMicroV; %#ok<AGROW>
@@ -171,18 +198,17 @@ for eii = 1:numel(evtIdx)
         if isempty(rows)
             fprintf('Evt %d: no valid channels (peak align), skip.\n', e); continue;
         end
-        % unify (each row already centered on its own anchor)
         Y = cell2mat(rows(:));
-        s0 = -HW; s1 = +HW; % for labeling only (relative time)
+        s0 = -HW; s1 = +HW; % relative only
     end
 
-    % ---------- Build styles and fixed y-limits ----------
+    % Time vectors and y-limits
     tRelSmps = -HW:HW;
     tRelMs   = (tRelSmps / sfx) * 1e3;
     maxAbs = max(abs(Y(:))); if ~isfinite(maxAbs)||maxAbs==0, maxAbs=1; end
     span = 1.05*maxAbs; yL = [-span, +span];
 
-    % ---------- Figure: rows-only (one column) ----------
+    % Figure
     nUsed = size(Y,1);
     perRowPx = 90; basePx = 200; maxPx = 5000;
     figH = min(maxPx, basePx + perRowPx*nUsed);
@@ -190,7 +216,7 @@ for eii = 1:numel(evtIdx)
     tl = tiledlayout(f, nUsed, 1, 'Padding','compact', 'TileSpacing','compact');
 
     for r = 1:nUsed
-        k = usedIdx(r);            % row index in cscNums/files
+        k = usedIdx(r);
         nexttile(tl); hold on; box on; grid on;
 
         isActive = activeMaskCSC(k);
@@ -208,13 +234,10 @@ for eii = 1:numel(evtIdx)
         ylabel('\muV');
     end
 
-    % ---------- Save ----------
-   nActive = sum(activeMaskCSC);
-winMs = (numel(tRelMs)>1) * (tRelMs(end)-tRelMs(1)); %#ok<NASGU>
-sgtitle(tl, sprintf('Evt %d  |  Active %d  |  Align: %s  |  Win ±%.1f ms  |  sfx=%g Hz', ...
-    e, nActive, alignMode, 1e3*HW/sfx, sfx), ...
-    'FontSize', 12, 'FontWeight', 'bold');
-
+    nActive = sum(activeMaskCSC);
+    sgtitle(tl, sprintf('Evt %d  |  Active %d  |  Align: %s  |  Win ±%.1f ms  |  sfx=%g Hz', ...
+        e, nActive, alignMode, 1e3*HW/sfx, sfx), ...
+        'FontSize', 12, 'FontWeight', 'bold');
 
     outPng = fullfile(outDir, sprintf('Evt%03d_%dch_align-%s_HW%ds_rows-only_uV_fixedY.png', ...
                     e, nActive, alignMode, HW));
@@ -226,36 +249,31 @@ end
 fprintf('Done. Output dir: %s\n', outDir);
 end
 
-% ================= helpers =================
+% ========== helpers ==========
 
 function y = read_csc_samples(fileRec, s0, s1, REC)
-% Return exact sample slice [s0..s1] (1-based) from CSC file.
-% Uses record-range extraction to avoid loading whole file.
+% Return exact sample slice [s0..s1] (1-based) from CSC file via record-range read.
 if s1 < s0, y = []; return; end
 rec0 = floor((s0-1)/REC) + 1;
 rec1 = floor((s1-1)/REC) + 1;
-
-% Read samples for record index RANGE
-% Nlx2MatCSC(File,[TS,Ch,Fs,NValid,Samples],HdrFlag,ExtractMode,Vector)
 S = Nlx2MatCSC(fullfile(fileRec.folder, fileRec.name), [0 0 0 0 1], 0, 2, [rec0 rec1]);
 if isempty(S), y = []; return; end
-v = S(:)';  % 512 x N -> vector
-
-% Offset within block
+v = S(:)';                             % 512 x N -> row
 off0 = s0 - ((rec0-1)*REC + 1);
 off1 = s1 - ((rec0-1)*REC + 1);
 i0 = max(0, off0); i1 = min(numel(v)-1, off1);
 if i1 < i0, y = []; else, y = v(i0+1:i1+1); end
 end
 
-function v = tern(cond, a, b), if cond, v=a; else, v=b; end, end
+function s = tern(cond, a, b), if cond, s=a; else, s=b; end, end
 
-function vec = str2num_safe(strCSV)
-% parse "2,4,6" -> [2 4 6]; trims spaces; empty -> []
-if strlength(strCSV)==0
-    vec = [];
-else
-    parts = split(strCSV,','); parts = strtrim(parts);
-    vec = str2double(parts); vec = vec(~isnan(vec));
-end
+function v = str2num_list(strCSV)
+% Parse "2,4,6" or "2 4 6" -> [2 4 6]; trims spaces; empty -> []
+strCSV = string(strCSV);
+if strlength(strCSV)==0, v=[]; return; end
+strCSV = regexprep(strCSV, '[\[\]\(\)]', '');
+strCSV = strrep(strCSV,';',',');
+parts = split(strtrim(strCSV), {',',' '});
+parts = parts(parts~="");
+v = str2double(parts); v = v(~isnan(v));
 end
