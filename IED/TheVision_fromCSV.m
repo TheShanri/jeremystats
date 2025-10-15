@@ -69,7 +69,13 @@ cscNums = nums(:)'; nChan = numel(cscNums);
 
 % ---------- Determine sample rate from first file ----------
 % Nlx2MatCSC(File,[TS,Ch,Fs,NValid,Samples],HdrFlag,ExtractMode,Vector)
-[~, ~, FsVec] = Nlx2MatCSC(fullfile(files(1).folder, files(1).name), [0 0 1 0 0], 0, 1, []);
+FsVec = Nlx2MatCSC(fullfile(files(1).folder, files(1).name), [0 0 1 0 0], 0, 1, []);
+if isempty(FsVec)
+    error('Could not read sampling frequency from %s', files(1).name);
+end
+sfx = double(FsVec(1));
+fprintf('[info] sfx = %g Hz (from %s)\n', sfx, files(1).name);
+
 if isempty(FsVec), error('Could not read sampling frequency from first CSC.'); end
 sfx = double(FsVec(1));
 fprintf('[info] sfx = %g Hz (from %s)\n', sfx, files(1).name);

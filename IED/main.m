@@ -30,18 +30,3 @@ TheVision_fromCSV("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26","C:\User
 %Pipeline_Main("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
 %vacc_ied_detect_chunked_thr(186565)
 
-
-TheVision_fromCSV("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26","C:\Users\Z390\Desktop\jeremystats\IED\events_summary.csv")
-
-main
-	An error has occurred. Based on the field selection vector, 1 output arguments are expected, but 3 arguments were provided.
-One or more output arguments not assigned during call to "Nlx2MatCSC".
-
-Error in TheVision_fromCSV (line 72)
-[~, ~, FsVec] = Nlx2MatCSC(fullfile(files(1).folder, files(1).name), [0 0 1 0 0], 0, 1, []);
-
-Error in main (line 6)
-TheVision_fromCSV("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26","C:\Users\Z390\Desktop\jeremystats\IED\events_summary.csv")
- 
-
-    
