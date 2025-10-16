@@ -494,4 +494,3 @@ T = table( repmat(string(groupName), nCh,1), ...
            'VariableNames', {'Group','Row','ChannelLabel','Nused','AmpMean_uV','AmpSD_uV','HW_ms_Mean','HW_ms_SD'});
 end
 end
-%
