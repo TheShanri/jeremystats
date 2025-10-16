@@ -1,17 +1,17 @@
 function VACC_TheVision(dataDir, varargin)
-% VACC_TheVision — live Neuralynx IED visualizer (even channels default)
-% Loads ets.mat & ech.mat from the same folder as CSC*.ncs
-% Reads ±50 ms around each event directly from disk (no pre-mat data)
+% VACC_TheVision — full-load visualizer for IED events (VACC edition)
+% Loads all even-numbered CSC*.ncs files from the folder once,
+% loads ets.mat / ech.mat, and plots ±50 ms windows per event.
 %
 % Usage:
 %   VACC_TheVision("D:\PTEN\M13_pten\HF4s\IED DATA");
 %
 % Optional Name–Value pairs:
-%   'halfWidthMs'   default 50e-3   % ±50 ms window
+%   'halfWidthMs'   default 50e-3
 %   'scaleToMicroV' default 1
 %   'minCh'         default 6
 %   'maxCh'         default 8
-%   'evenOnly'      default true    % only use even-numbered CSCs
+%   'evenOnly'      default true
 
 % ---------- Parse ----------
 p = inputParser;
@@ -41,9 +41,9 @@ fprintf("Loaded %d events × %d channels from ets/ech\n", size(ets,1), size(ech,
 
 % ---------- Find CSC files ----------
 files = dir(fullfile(dataDir, 'CSC*.ncs'));
-if isempty(files), error('No CSC*.ncs files found in %s', dataDir); end
+if isempty(files), error('No CSC*.ncs found in %s', dataDir); end
 
-% Extract numeric channel numbers
+% Extract numeric channel numbers and keep evens if requested
 nums = cellfun(@(n) sscanf(n,'CSC%d.ncs'), {files.name});
 keep = ~isnan(nums);
 if evenOnly
@@ -51,14 +51,37 @@ if evenOnly
 end
 files = files(keep);
 nums  = nums(keep);
-
-% Sort by channel number
 [nums, order] = sort(nums);
 files = files(order);
 nCh = numel(files);
 fprintf('Using %d %s-numbered channels\n', nCh, tern(evenOnly,'even','all'));
 
-% ---------- Setup ----------
+% ---------- Load all CSC data ----------
+fprintf('Loading all channel data into memory...\n');
+S = cell(1,nCh);
+for k = 1:nCh
+    fn = fullfile(dataDir, files(k).name);
+    try
+        samples = Nlx2MatCSC(fn, [0 0 0 0 1], 0, 1, []); % read all
+        s = reshape(samples, 1, []);          % flatten
+        s = single(-s) * scaleToMicroV;       % invert polarity, scale
+        S{k} = s;
+    catch ME
+        fprintf('Ch%d failed to load (%s)\n', nums(k), ME.message);
+        S{k} = [];
+    end
+end
+maxlen = max(cellfun(@numel, S));
+d = zeros(nCh, maxlen, 'single');
+for k = 1:nCh
+    if isempty(S{k}), continue; end
+    v = S{k};
+    d(k,1:numel(v)) = v;
+end
+clear S
+fprintf('Loaded %d channels, %d samples each (approx).\n', nCh, maxlen);
+
+% ---------- Parameters ----------
 sfx = 30000;                              % sampling rate
 HW = round(HWms * sfx);                   % half-window in samples
 tRel = (-HW:HW)/sfx*1e3;                  % ms relative
@@ -78,33 +101,18 @@ fprintf('Processing %d events (±%.1f ms)...\n', numel(evtIdx), HWms*1e3);
 % ---------- Main loop ----------
 for ei = 1:numel(evtIdx)
     e = evtIdx(ei);
-    active = ech(e,1:nCh);                % trim to available channels
+    active = ech(e,1:nCh);
     nActive = sum(active);
     anchor = round(mean(ets(e,:)));
-    s0 = anchor - HW; s1 = anchor + HW;
-    if s0 < 1, s0 = 1; end
-
-    Y = cell(1,nCh);
-    for c = 1:nCh
-        fn = fullfile(dataDir, files(c).name);
-        try
-            % Neuralynx: FieldSelect=[0 0 0 0 1], ExtractMode 2 or 4 depending on version
-            try
-                samples = Nlx2MatCSC(fn, [0 0 0 0 1], 0, 4, [s0 s1]); % try range mode
-            catch
-                samples = Nlx2MatCSC(fn, [0 0 0 0 1], 0, 2, [s0 s1]); % fallback to extract all (slower)
-            end
-            s = reshape(samples, 1, []);
-            s = single(-s) * scaleToMicroV;   % invert polarity, µV
-            Y{c} = s;
-        catch ME
-            fprintf('Ch%d failed (%s)\n', nums(c), ME.message);
-            Y{c} = nan(1,2*HW+1);
-        end
+    s0 = max(1, anchor - HW);
+    s1 = min(size(d,2), anchor + HW);
+    Ymat = d(:, s0:s1);
+    if isempty(Ymat)
+        fprintf('Evt %d skipped (out of bounds)\n', e);
+        continue;
     end
 
-    % Combine to matrix
-    Ymat = cell2mat(Y');
+    % Compute y-limits
     maxAbs = max(abs(Ymat(:)));
     if ~isfinite(maxAbs)||maxAbs==0, maxAbs = 1; end
     yL = 1.05*maxAbs*[-1 1];
@@ -122,7 +130,7 @@ for ei = 1:numel(evtIdx)
         else
             lw = 0.6; col = [0.6 0.6 0.6];
         end
-        plot(tRel, Ymat(c,:), 'Color', col, 'LineWidth', lw);
+        plot(tRel, Ymat(c,1:numel(tRel)), 'Color', col, 'LineWidth', lw);
         xline(0,'--k'); yline(0,':','Color',[0.7 0.7 0.7]);
         ylim(yL);
         title(sprintf('CSC%d%s', nums(c), tern(isAct,' *','')), 'FontSize',8);
