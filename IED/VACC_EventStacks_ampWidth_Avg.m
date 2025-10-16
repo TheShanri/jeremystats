@@ -1,16 +1,14 @@
 function res = VACC_EventStacks_ampWidth_Avg(dataDir, V, varargin)
 % VACC_EventStacks_ampWidth_Avg
-% VACC version of EventStacks_ampWidth_Avg_Pipeline:
-%   - Uses converted data struct V (µV) instead of dataMatPath
-%   - Solid/Sputter folders are under dataDir/VACC_TheVision_out/
-%   - Saves SOLID/SPUTTER PNGs + stats + per-channel CSV
+% Uses converted data struct V (µV) + ets.mat for event windows.
+% Solid/Sputter folders are under dataDir/VACC_TheVision_out/.
 %
 % INPUTS
-%   dataDir : folder that contains VACC_TheVision_out/{Solid,Sputter} and the Excel
-%   V       : struct with fields
-%             V.D  [nCh x nSamp]  (µV, single)
-%             V.fs (Hz)
-%             V.nums (CSC numbers per row)
+%   dataDir : folder that contains VACC_TheVision_out/{Solid,Sputter} and ets.mat
+%   V       : struct with fields:
+%             V.D   [nCh x nSamp]  (µV, single)
+%             V.fs  (Hz)
+%             V.nums (CSC numbers per row, optional)
 %
 % OUTPUT (for pipeline picker)
 %   res.pngSolid, res.pngSputter, res.statsMatSolid, res.statsMatSputter, res.statsCSV
@@ -19,16 +17,14 @@ function res = VACC_EventStacks_ampWidth_Avg(dataDir, V, varargin)
 p = inputParser;
 p.addRequired('dataDir', @(s)ischar(s)||isstring(s));
 p.addRequired('V',       @(x)isstruct(x) && isfield(x,'D') && isfield(x,'fs'));
+
 % Selection / alignment / windows
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
 p.addParameter('halfWidthMs',         10e-3, @(x)isfinite(x)&&x>0); % ±10 ms display/averaging
 p.addParameter('metricHalfWidthMs',    5e-3, @(x)isfinite(x)&&x>0); % ±5 ms metrics
 p.addParameter('anchorHalfWidthMs',    5e-3, @(x)isfinite(x)&&x>0); % ±5 ms anchor search
-% Spreadsheet + mapping
-p.addParameter('excelPath',"", @(s)ischar(s)||isstring(s));
-p.addParameter('indexBase','auto', @(s) any(strcmpi(s,{'auto','zero','one'})));
-p.addParameter('evtOffset',0, @(x)isscalar(x)&&isfinite(x));
-p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
+p.addParameter('evtOffset',0, @(x)isscalar(x)&&isfinite(x));        % optional offset if your EvtNNN indexing starts at 0
+
 % Output + y-axis
 p.addParameter('saveDir',"", @(s)ischar(s)||isstring(s));
 p.addParameter('tag','ALL', @(s)ischar(s)||isstring(s));
@@ -47,10 +43,7 @@ halfWidthMs    = p.Results.halfWidthMs;
 metricHWms     = p.Results.metricHalfWidthMs;
 anchorHWms     = p.Results.anchorHalfWidthMs;
 
-excelPath      = string(p.Results.excelPath);
-indexBase      = lower(string(p.Results.indexBase));
 evtOffset      = p.Results.evtOffset;
-maxEventsPerGp = p.Results.maxEventsPerGroup;
 
 saveDir        = string(p.Results.saveDir);
 tagStr         = string(p.Results.tag);
@@ -65,13 +58,16 @@ sputterDir = fullfile(rootVision, "Sputter");
 assert(isfolder(solidDir),   'Missing folder: %s', solidDir);
 assert(isfolder(sputterDir), 'Missing folder: %s', sputterDir);
 
-% Excel (find first .xlsx if not provided)
-if excelPath == ""
-    xl = dir(fullfile(dataDir, "*.xlsx"));
-    assert(~isempty(xl), 'No Excel file (*.xlsx) found in %s', dataDir);
-    excelPath = fullfile(xl(1).folder, xl(1).name);
+% ---------------- Load ets/ech ----------------
+S = load(fullfile(dataDir,'ets.mat'),'ets');
+assert(isfield(S,'ets') && ~isempty(S.ets), 'ets.mat missing or invalid in %s', dataDir);
+ets = double(S.ets);                  % [Nevents x 2] in samples: [start end]
+NrowsETS = size(ets,1);
+
+% (optional) ech if you ever want group filters by channel presence
+if isfile(fullfile(dataDir,'ech.mat'))
+    ECH = load(fullfile(dataDir,'ech.mat')); %#ok<NASGU>
 end
-assert(isfile(excelPath), 'Excel not found: %s', excelPath);
 
 % ---------------- Data selection ----------------
 [nRowsAll, nSamp] = size(D);
@@ -111,48 +107,10 @@ fprintf(['VACC_EventStacks_ampWidth_Avg: sfx=%.1f Hz | display ±%.1f ms | ' ...
          'metrics ±%.1f ms | anchorSearch ±%.1f ms | channels=%d\n'], ...
          sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, 1e3*HWanchor/sfx, nCh);
 
-% ---------------- Spreadsheet -> samples ----------------
-T = readtable(excelPath, 'ReadVariableNames', true);
-canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
-i_onSamp  = find(strcmp(canon,'onsamp')  | strcmp(canon,'startsample') | strcmp(canon,'startsamp') | strcmp(canon,'on'), 1);
-i_offSamp = find(strcmp(canon,'offsamp') | strcmp(canon,'endsample')   | strcmp(canon,'endsamp')   | strcmp(canon,'off'), 1);
-i_onSec   = find(strcmp(canon,'onsec')   | strcmp(canon,'startsec')    | strcmp(canon,'onsecs'), 1);
-i_offSec  = find(strcmp(canon,'offsec')  | strcmp(canon,'endsec')      | strcmp(canon,'offsecs'), 1);
-
-if ~isempty(i_onSamp) && ~isempty(i_offSamp)
-    onSamp  = double(T{:, i_onSamp});
-    offSamp = double(T{:, i_offSamp});
-elseif ~isempty(i_onSec) && ~isempty(i_offSec)
-    onSamp  = round(double(T{:, i_onSec})  * sfx);
-    offSamp = round(double(T{:, i_offSec}) * sfx);
-else
-    assert(width(T) >= 2, 'Excel must have [on_samp, off_samp] or [on_sec, off_sec].');
-    onSamp  = double(T{:,1});
-    offSamp = double(T{:,2});
-end
-
-switch indexBase
-    case "zero", onSamp = onSamp+1; offSamp = offSamp+1;
-    case "auto"
-        if any(onSamp < 1 | offSamp < 1 | onSamp==0 | offSamp==0)
-            onSamp = onSamp+1; offSamp = offSamp+1;
-        end
-    case "one" % no-op
-end
-
-NrowsXL = numel(onSamp);
-onSamp  = max(1, min(onSamp,  nSamp));
-offSamp = max(1, min(offSamp, nSamp));
-
 % ---------------- Events from PNG names ----------------
 evtSOL = unique(parseEvtNumsFromPngs(solidDir));
 evtSPU = unique(parseEvtNumsFromPngs(sputterDir));
 fprintf('Found %d SOLID, %d SPUTTER events (by filenames).\n', numel(evtSOL), numel(evtSPU));
-
-if ~isempty(maxEventsPerGp)
-    evtSOL = evtSOL(1:min(end, maxEventsPerGp));
-    evtSPU = evtSPU(1:min(end, maxEventsPerGp));
-end
 
 % ---------------- Build group stats ----------------
 [SOL, robSOL] = avgForGroup(evtSOL, 'SOLID');
@@ -183,11 +141,9 @@ try
     Tcsv = [Tcsv; makePerChannelTable(SPU, 'SPUTTER', chList, kept_channels)];
     writetable(Tcsv, csvAll);
 catch ME
-    wid = ME.identifier;
-    if isempty(wid), wid = 'VACC:CSVWriteFailed'; end
+    wid = ME.identifier; if isempty(wid), wid = 'VACC:CSVWriteFailed'; end
     warning(wid, 'Failed writing EventStacks per-channel stats CSV to %s: %s', csvAll, ME.message);
 end
-
 
 % ---------------- Return paths ----------------
 res = struct('outputDir', outDir, ...
@@ -215,9 +171,7 @@ function evts = parseEvtNumsFromPngs(dirpath)
 end
 
 function yMax = computeYMaxForGroup(G)
-    if isempty(G) || all(all(isnan(G.MU)))
-        yMax = 0; return;
-    end
+    if isempty(G) || all(all(isnan(G.MU))), yMax = 0; return; end
     mm = max(abs([G.MU(:)+G.SE(:); G.MU(:)-G.SE(:)]), [], 'omitnan');
     as = max(G.ampMean + 3*G.ampSD, [], 'omitnan');
     yMax = max([mm, as, 0], [], 'omitnan');
@@ -243,16 +197,16 @@ function [G, robAll] = avgForGroup(evtList, tag)
 
     for ii = 1:numel(evtList)
         e = evtList(ii);
-        rowXL = e + evtOffset;
-        if rowXL < 1 || rowXL > NrowsXL
+        rowETS = e + evtOffset;                 % allow optional offset
+        if rowETS < 1 || rowETS > NrowsETS
             alt = e;
-            if alt >= 1 && alt <= NrowsXL, rowXL = alt; else, nBad=nBad+1; continue; end
+            if alt >= 1 && alt <= NrowsETS, rowETS = alt; else, nBad=nBad+1; continue; end
         end
 
-        s0_ev = max(1, round(onSamp(rowXL)));
-        s1_ev = min(nSamp, round(offSamp(rowXL)));
+        s0_ev = max(1, round(ets(rowETS,1)));
+        s1_ev = min(nSamp, round(ets(rowETS,2)));
         if ~isfinite(s0_ev) || ~isfinite(s1_ev) || s1_ev <= s0_ev
-            nBad=nBad+1; continue;
+            nBad = nBad + 1; continue;
         end
 
         ancMid = round((s0_ev + s1_ev)/2);
@@ -260,7 +214,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
         % -------- COMMON ANCHOR from FIRST channel, POSITIVE PEAK ONLY --------
         s0srch = max(1, ancMid - HWanchor);
         s1srch = min(nSamp, ancMid + HWanchor);
-        yseg0  = double(D(refCh, s0srch:s1srch));   % already µV
+        yseg0  = double(D(refCh, s0srch:s1srch));   % µV
 
         if isempty(yseg0) || all(~isfinite(yseg0))
             nBad = nBad + 1; continue;
