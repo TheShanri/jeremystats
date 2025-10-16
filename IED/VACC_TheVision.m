@@ -1,144 +1,126 @@
-function VACC_TheVision(dataDir, varargin)
-% -------------------------------------------------------------------------
-% VACC_TheVision — Event visualizer for VACC IED pipeline
+function TheVision_vacc(dataDir, varargin)
+% TheVision_vacc — Plot IED events directly from Neuralynx .ncs files
+% Usage: TheVision_vacc('path/to/IED DATA')
 %
-% Loads ets.mat / ech.mat and all CSC*.ncs files in a folder.
-% Plots ±50 ms windows around each event (midpoint anchor).
+% Requirements:
+%   • LLspikedetector outputs: ets.mat, ech.mat in same folder
+%   • Neuralynx converter: Nlx2MatCSC.m/.mex in path
 %
-% Example:
-%   VACC_TheVision("D:\PTEN\M13_pten\HF4s\IED DATA");
+% Default behavior:
+%   - Uses only even-numbered CSC channels
+%   - Window ±50 ms around event midpoint
+%   - Plots one column (rows = channels)
 %
-% -------------------------------------------------------------------------
+% Optional name/value:
+%   'HalfWidthMs', 'MinCh', 'MaxCh', 'EvenOnly', 'ScaleToMicroV'
 
-%% Parameters
+% ---------- Parse ----------
 p = inputParser;
 p.addRequired('dataDir', @(s)ischar(s)||isstring(s));
-p.addParameter('halfWidthMs', 50, @(x)isfinite(x)&&x>0); % ±50 ms
-p.addParameter('scaleToMicroV', 1, @(x)isfinite(x)&&x>0);
-p.addParameter('minCh', 6, @(x)isfinite(x)&&x>=0);
-p.addParameter('maxCh', 8, @(x)isfinite(x)&&x>=0);
-p.addParameter('evenOnly', true, @(x)islogical(x));
+p.addParameter('HalfWidthMs', 50, @(x)isfinite(x)&&x>0);
+p.addParameter('MinCh', 6, @(x)isfinite(x));
+p.addParameter('MaxCh', 8, @(x)isfinite(x));
+p.addParameter('EvenOnly', true, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('ScaleToMicroV', 1, @(x)isfinite(x)&&x>0);
 p.parse(dataDir, varargin{:});
-dataDir = string(p.Results.dataDir);
-halfWidthMs   = p.Results.halfWidthMs;
-scaleFactor   = p.Results.scaleToMicroV;
-minCh         = p.Results.minCh;
-maxCh         = p.Results.maxCh;
-evenOnly      = p.Results.evenOnly;
 
-sfx = 30000;                         % sampling rate
-HW  = round((halfWidthMs/1000) * sfx); % samples per half-window
-tRel = (-HW:HW)/sfx*1e3;             % time axis in ms
+dataDir = string(dataDir);
+halfWidthMs   = p.Results.HalfWidthMs;
+minCh         = p.Results.MinCh;
+maxCh         = p.Results.MaxCh;
+evenOnly      = logical(p.Results.EvenOnly);
+scaleToMicroV = p.Results.ScaleToMicroV;
 
-fprintf('\n=== VACC_TheVision ===\n');
+sfx = 30000; % Hz (fixed)
+HW  = round((halfWidthMs/1000)*sfx);
 
-%% Load event data
-load(fullfile(dataDir,'ets.mat'),'ets');
-load(fullfile(dataDir,'ech.mat'),'ech');
-fprintf('Loaded %d events × %d channels\n', size(ets,1), size(ech,2));
+% ---------- Load spike info ----------
+S = load(fullfile(dataDir,'ets.mat'));
+ets = S.ets;
+S = load(fullfile(dataDir,'ech.mat'));
+ech = S.ech;
+Nevents = size(ets,1);
 
-%% Locate CSC files
+% ---------- Get list of CSC files ----------
 files = dir(fullfile(dataDir,'CSC*.ncs'));
-if isempty(files), error('No CSC*.ncs found.'); end
-nums = cellfun(@(n) sscanf(n,'CSC%d.ncs'), {files.name});
-valid = ~isnan(nums);
-if evenOnly, valid = valid & mod(nums,2)==0; end
-files = files(valid); nums = nums(valid);
-[nums, order] = sort(nums); files = files(order);
+if isempty(files)
+    error('No .ncs files found in %s',dataDir);
+end
+names = {files.name};
+nums  = cellfun(@(s) sscanf(s,'CSC%d.ncs'), names);
+if evenOnly
+    keep = mod(nums,2)==0 & ~isnan(nums);
+    files = files(keep);
+    nums  = nums(keep);
+end
 nCh = numel(files);
-fprintf('Using %d %s-numbered channels\n', nCh, tern(evenOnly,'even','all'));
+fprintf('Loaded %d channel files (%s).\n', nCh, tern(evenOnly,'even only','all'));
 
-%% Load all channels (full files)
-fprintf('Loading channel data (may take a while)...\n');
-data = cell(1,nCh);
-for i = 1:nCh
-    fname = fullfile(dataDir, files(i).name);
-    try
-        % === The correct 5-output call ===
-        [~,~,~,~,samples] = Nlx2MatCSC(fname, [0 0 0 0 1], 0, 1, []);
-        s = reshape(samples,1,[]);
-        s = single(-s) * scaleFactor;     % invert, scale
-        data{i} = s;
-    catch ME
-        fprintf('  !! %s failed: %s\n', files(i).name, ME.message);
-        data{i} = [];
-    end
-end
-
-maxlen = max(cellfun(@numel,data));
-fprintf('Longest channel: %.1f sec\n', maxlen/sfx);
-
-D = zeros(nCh, maxlen,'single');
-for i = 1:nCh
-    v = data{i};
-    if isempty(v), continue; end
-    D(i,1:numel(v)) = v;
-end
-clear data
-
-%% Event selection
-chCount = sum(ech(:,1:nCh),2);
-sel = (chCount>=minCh) & (chCount<=maxCh);
+% ---------- Event selection ----------
+chCounts = sum(ech,2);
+sel = (chCounts>=minCh)&(chCounts<=maxCh);
 evtIdx = find(sel);
-fprintf('Plotting %d events (6–8ch)\n', numel(evtIdx));
+if isempty(evtIdx)
+    fprintf('No events with %d–%d channels.\n',minCh,maxCh);
+    return;
+end
+fprintf('%d qualifying events. Window ±%d ms (±%d samples)\n',numel(evtIdx),halfWidthMs,HW);
 
-outDir = fullfile(dataDir,'VACC_TheVision_out');
+outDir = fullfile(dataDir,'IED_PLOTS');
 if ~exist(outDir,'dir'), mkdir(outDir); end
 
-%% Iterate events
+% ---------- Iterate events ----------
 for ii = 1:numel(evtIdx)
     e = evtIdx(ii);
-    active = logical(ech(e,1:nCh));
-    nActive = sum(active);
+    s0 = max(1, round(mean(ets(e,:))) - HW);
+    s1 = s0 + 2*HW;
 
-    anchor = round(mean(ets(e,:)));
-    s0 = max(1, anchor - HW);
-    s1 = min(size(D,2), anchor + HW);
+    activeMask = ech(e,:);
+    nActive = sum(activeMask);
 
-    if s1 <= s0
-        fprintf('Evt %d skipped (out of range)\n', e);
-        continue;
-    end
-
-    Y = D(:,s0:s1);
-    maxAbs = max(abs(Y(:)));
-    if maxAbs==0 || ~isfinite(maxAbs), maxAbs=1; end
-    yL = 1.05*maxAbs*[-1 1];
-
-    % ---------- Plot ----------
-    figH = min(150 + 90*nCh, 5000);
-    f = figure('Color','w','Position',[100 100 900 figH],'Visible','off');
-    tl = tiledlayout(f,nCh,1,'Padding','compact','TileSpacing','compact');
-
-    for ch = 1:nCh
-        nexttile(tl);
-        hold on; box on; grid on;
-        if active(ch)
-            lw = 1.4; col=[0 0 0];
-        else
-            lw = 0.6; col=[0.6 0.6 0.6];
+    Y = zeros(nCh, 2*HW+1, 'single');
+    for k = 1:nCh
+        fn = fullfile(files(k).folder, files(k).name);
+        try
+            seg = Nlx2MatCSC(fn, [0 0 0 0 1], 0, 4, [s0 s1]); % Extract samples by record range
+            y = reshape(seg,1,[]);
+            if numel(y)<2*HW+1, y(end+1:2*HW+1)=NaN; end
+            Y(k,:) = single(-y)*scaleToMicroV;
+        catch
+            Y(k,:) = NaN;
         end
-        plot(tRel,Y(ch,1:numel(tRel)),'Color',col,'LineWidth',lw);
-        xline(0,'--k'); yline(0,':','Color',[0.7 0.7 0.7]);
-        ylim(yL);
-        title(sprintf('CSC%d%s',nums(ch),tern(active(ch),' *','')),'FontSize',8);
-        if ch==nCh, xlabel('ms'); end
-        ylabel('\muV');
     end
 
-    sgtitle(tl,sprintf('Evt %03d | %d ch | ±%.0f ms | yLim ±%.1f µV',...
-        e,nActive,halfWidthMs,yL(2)),...
-        'FontSize',12,'FontWeight','bold');
+    maxAbs = max(abs(Y(:)),'omitnan');
+    if ~isfinite(maxAbs)||maxAbs==0, maxAbs=1; end
+    yL = 1.05*maxAbs*[-1 1];
+    tRelMs = (-HW:HW)/sfx*1e3;
 
-    outPng = fullfile(outDir,sprintf('Evt%03d_%dch.png',e,nActive));
-    exportgraphics(f,outPng,'Resolution',220);
+    f=figure('Color','w','Position',[60 60 900 min(400+80*nCh,5000)],'Visible','off');
+    tl=tiledlayout(f,nCh,1,'Padding','compact','TileSpacing','compact');
+
+    for k=1:nCh
+        nexttile(tl);
+        hold on; box on;
+        plot(tRelMs,Y(k,:),'Color',tern(activeMask(k),[0 0 0],[0.6 0.6 0.6]),...
+             'LineWidth',tern(activeMask(k),1.2,0.6));
+        xline(0,'--k','LineWidth',0.6);
+        ylim(yL);
+        ylabel('\muV');
+        title(sprintf('CSC%d%s',nums(k),tern(activeMask(k),' *','')),'FontSize',8);
+        if k<nCh, set(gca,'XTickLabel',[]); else, xlabel('ms'); end
+    end
+
+    sgtitle(tl,sprintf('Event %03d  |  Active %dch  |  ±%d ms',e,nActive,halfWidthMs),'FontSize',12);
+    exportgraphics(f,fullfile(outDir,sprintf('Evt%03d_%dch.png',e,nActive)),'Resolution',220);
     close(f);
-    fprintf('Saved %s\n', outPng);
+    fprintf('Saved Evt%03d\n',e);
 end
 
-fprintf('\nDone. Output saved in %s\n', outDir);
+fprintf('All done → %s\n',outDir);
 end
 
-function s = tern(c,a,b)
-if c, s=a; else, s=b; end
+% --- tiny ternary helper ---
+function y=tern(c,a,b)
+if c, y=a; else, y=b; end
 end
