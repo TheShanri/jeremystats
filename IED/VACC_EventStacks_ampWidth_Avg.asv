@@ -42,7 +42,7 @@ p.addRequired('V',       @(x)isstruct(x) && isfield(x,'D') && isfield(x,'fs'));
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
 p.addParameter('halfWidthMs',         50e-3, @(x)isfinite(x)&&x>0); % ±10 ms display/averaging
 p.addParameter('metricHalfWidthMs',    5e-3, @(x)isfinite(x)&&x>0); % ±5 ms metrics
-p.addParameter('anchorHalfWidthMs',    10e-3, @(x)isfinite(x)&&x>0); % ±5 ms anchor search
+p.addParameter('anchorHalfWidthMs',    5e-3, @(x)isfinite(x)&&x>0); % ±5 ms anchor search
 p.addParameter('evtOffset', 0, @(x)isscalar(x)&&isfinite(x));       % optional offset (EvtNNN indexing)
 
 % Output + labeling (y-limit is fixed to ±3000 unless user overrides)
@@ -72,7 +72,7 @@ yLimOverride   = p.Results.yLimMicroV;
 % ---------------- Layout ----------------
 rootVision = fullfile(dataDir, "VACC_TheVision_out");
 solidDir   = fullfile(rootVision, "Solid");
-sputterDir = fullfile(rootVision, "Garbage");
+sputterDir = fullfile(rootVision, "Sputter");
 assert(isfolder(solidDir),   'Missing folder: %s', solidDir);
 assert(isfolder(sputterDir), 'Missing folder: %s', sputterDir);
 
