@@ -21,8 +21,8 @@ p.addRequired('dataDir',      @(s)ischar(s)||isstring(s));
 
 % channel / polarity / file selection
 p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=1)));
-p.addParameter('evenOnly', false, @(x)islogical(x)||ismember(x,[0 1]));
-p.addParameter('invertPolarity', false, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('evenOnly', true, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('invertPolarity', true, @(x)islogical(x)||ismember(x,[0 1]));
 
 % windows (seconds)
 p.addParameter('displayHalfWidthSec',  10e-3, @(x)isfinite(x)&&x>0); % ±10 ms
