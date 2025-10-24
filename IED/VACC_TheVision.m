@@ -13,8 +13,8 @@ function VACC_TheVision(dataDir, varargin)
 p = inputParser;
 p.addRequired('dataDir', @(s)ischar(s)||isstring(s));
 p.addParameter('halfWidthMs', 50, @(x)isfinite(x)&&x>0);
-p.addParameter('minCh', 6, @(x)isfinite(x)&&x>=0);
-p.addParameter('maxCh', 8, @(x)isfinite(x)&&x>=0);
+p.addParameter('minCh', 1, @(x)isfinite(x)&&x>=0);
+p.addParameter('maxCh', 32, @(x)isfinite(x)&&x>=0);
 p.addParameter('evenOnly', true, @(x)islogical(x));
 p.addParameter('invertPolarity', true, @(x)islogical(x));
 p.parse(dataDir, varargin{:});
