@@ -4,17 +4,7 @@
 %vacc_summarize_master("compiled_master.mat")
 VACC_Pipeline_Main("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26\VACC_TheVision_out","D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26")
 
-Warning: EventStacks module failed: The variable 'G' does not contain a field named 'chList_local'. 
-> In VACC_Pipeline_Main (line 34)
-In main (line 5) 
-Composing SOLID compact montage ...
-Warning: Failed to build SOLID montage: File "" does not exist. 
-> In VACC_Pipeline_Main (line 75)
-In main (line 5) 
-Composing SPUTTER compact montage ...
-Warning: Failed to build SPUTTER montage: File "" does not exist. 
-> In VACC_Pipeline_Main (line 96)
-In main (line 5) 
+
 %LLSpikeViewer("C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_LLspikes_20250909_134703.mat")
 
 %SpikePerEventCrossChannelAvg("C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_LLspikes_20250909_134703.mat")

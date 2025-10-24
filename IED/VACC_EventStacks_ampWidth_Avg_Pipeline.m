@@ -371,15 +371,26 @@ function [G, robAll] = avgForGroup(evtList, tag)
         G.traces{k} = X;
     end
 
-    % Save lightweight stats for this group
-    alignLabel = sprintf('first-channel max (±%.1f ms)', 1e3*HWanchor/fs); %#ok<NASGU>
-    statsPath  = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
-    chList_local = chList; %#ok<NASGU>
-    save(statsPath, 'tRelMs','chList_local','kept_channels','displayHalfWidthSec','metricHalfWidthSec','fs', ...
-                    'alignLabel','-struct','G');
-    fprintf('Saved group stats: %s\n', statsPath);
+   fprintf('Preparing stats struct for group %s ...\n', tag);
 
-    % attach for caller
+% Pack required metadata INSIDE G, so G.chList_local exists when loaded.
+    G.tRelMs                 = tRelMs;                  % time axis (ms) used in plots
+    G.chList_local           = chList;                  % rows used (indices into D)
+    G.kept_channels          = kept_channels;           % CSC labels, index by row
+    G.displayHalfWidthSec    = displayHalfWidthSec;     % ± display window (s)
+    G.metricHalfWidthSec     = metricHalfWidthSec;      % ± metric window (s)
+    G.fs                     = fs;                      % sampling rate (Hz)
+    G.alignLabel             = sprintf('first-channel max (±%.1f ms)', 1e3*HWanchor/fs);
+    
+    statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
+    try
+        save(statsPath, 'G');                          % <-- single variable named G
+        fprintf('Saved group stats: %s (variable: G)\n', statsPath);
+    catch ME
+        warning('VACC:EventStacks:SaveStatsFailed', 'Failed to save stats for %s: %s', tag, ME.message);
+    end
+    
+    % track path for caller
     G.outStatsPath = statsPath;
 end
 
