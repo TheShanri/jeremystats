@@ -103,7 +103,7 @@ csvAll = fullfile(outDir, 'EventStacks_perChannel_Stats.csv');
 % ---------------- Windows ----------------
 HWdisp    = max(1, round(halfWidthMs * sfx));      % ± display/averaging
 HWmet     = max(1, round(metricHWms  * sfx));      % ± metrics
-HWanchor  = max(1, round(anchorHWms  * sfx));      % ± anchor search (first channel)
+HWanchor  = max(1, round(anchorHWms  * sfx));      % ± anchor search (last channel)
 tRelSamp  = -HWdisp:HWdisp;
 tRelMs    = (tRelSamp / sfx) * 1e3;
 winN      = numel(tRelSamp);
@@ -276,7 +276,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
             nBad = nBad + 1; continue;
         end
 
-        [~, k_rel] = min(yseg0);  % negative peak 
+        [~, k_rel] = max(yseg0);  % positive peak (no abs, no mins)
         if isempty(k_rel) || ~isfinite(k_rel)
             nBad = nBad + 1; continue;
         end
@@ -367,7 +367,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
     end
 
     % Save lightweight stats for this group
-    alignLabel = sprintf('last-channel trough  (±%.1f ms)', 1e3*HWanchor/sfx);
+    alignLabel = sprintf('last-channel max (±%.1f ms)', 1e3*HWanchor/sfx);
     statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
     chList_local = chList; scale_local = scaleToMicroV; %#ok<NASGU>
     Gsave = G;
@@ -484,7 +484,7 @@ function plotStackWithIndicators(G, tag, yL, outPng)
         ylabel(ax, '\muV');
     end
 
-    sg = sprintf('%s  |  anchor: last-channel trough (±%.1f ms)  |  display: \\pm%.1f ms  |  metrics: \\pm%.1f ms  |  channels=%d  |  %s', ...
+    sg = sprintf('%s  |  anchor: last-channel max (±%.1f ms)  |  display: \\pm%.1f ms  |  metrics: \\pm%.1f ms  |  channels=%d  |  %s', ...
                  tag, 1e3*HWanchor/sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, nCh, tagStr);
     sgtitle(tl, sg, 'FontSize',11,'FontWeight','bold');
 
