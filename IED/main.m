@@ -2,7 +2,7 @@
 %VACC_TheVision("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26")
 %VACC_Pipeline_Main("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26")
 %vacc_summarize_master("compiled_master.mat")
-VACC_Pipeline_Main("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26\VACC_TheVision_out","D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26")
+%VACC_Pipeline_Main("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26\VACC_TheVision_out","D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26")
 
 
 %LLSpikeViewer("C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_LLspikes_20250909_134703.mat")
@@ -24,7 +24,7 @@ VACC_Pipeline_Main("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26\VACC_The
 %CSD_CenterSlices_Waveforms_AvgGroups("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
 %CSD_TimeAvgSlices_Waveforms_AvgGroups("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
 
-%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
+Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Downloads\LL_input_2023-08-01_12-11-26_mex_disk_uV.mat")
 %vacc_global_threshold_v5("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26")
 %BatchConvert_CSC_fromSheet("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN","C:\Users\Z390\Desktop\IED DATA\Converted Data")
 %RunLLspikedetector_Folder("C:\Users\Barry Lab\Desktop\IED DATA\Batch raw Data")
