@@ -1,0 +1,103 @@
+function _simple(inputFolder, upscaleFactor)
+% plot_theta_ripple_heatmap_simple
+% -------------------------------------------------------------------------
+% Loads x1.mat (1xN), y1.mat (1xM), c1.mat (MxN), makes a JET heatmap,
+% fixes upside-down y, and (by default) upsamples the grid to reduce
+% blockiness in the saved SVG.
+%
+% Usage:
+%   plot_theta_ripple_heatmap_simple('C:\data\folder');          % 4x upsample
+%   plot_theta_ripple_heatmap_simple('C:\data\folder', 1);       % no upsample
+%   plot_theta_ripple_heatmap_simple('C:\data\folder', 8);       % 8x upsample
+% -------------------------------------------------------------------------
+
+    if nargin < 2 || isempty(upscaleFactor)
+        upscaleFactor = 4; % increase for smoother look, 1 = no upsampling
+    end
+
+    fprintf('--- Plot Theta/Ripple Heatmap (JET) ---\n');
+    fprintf('Input folder: %s\n', inputFolder);
+    fprintf('Upscale factor: %d\n', upscaleFactor);
+
+    % ---------------- Load data ----------------
+    xFilePath = fullfile(inputFolder, 'x1.mat');
+    yFilePath = fullfile(inputFolder, 'y1.mat');
+    cFilePath = fullfile(inputFolder, 'c1.mat');
+
+    xStruct = load(xFilePath);  xField = fieldnames(xStruct);  xValues = xStruct.(xField{1});
+    yStruct = load(yFilePath);  yField = fieldnames(yStruct);  yValues = yStruct.(yField{1});
+    cStruct = load(cFilePath);  cField = fieldnames(cStruct);  cMatrix = cStruct.(cField{1});
+
+    % Ensure shapes/orientation: c is [numel(y) x numel(x)]
+    xValues = xValues(:).';  % row
+    yValues = yValues(:).';  % row
+
+    if ~isequal(size(cMatrix), [numel(yValues), numel(xValues)])
+        fprintf('Transposing cMatrix to match [numel(y) x numel(x)]...\n');
+        cMatrix = cMatrix.';
+    end
+
+    fprintf('Original sizes -> x: %d, y: %d, c: %d x %d\n', ...
+        numel(xValues), numel(yValues), size(cMatrix,1), size(cMatrix,2));
+
+    % ---------------- Optional upsampling to reduce blockiness ----------------
+    if upscaleFactor > 1
+        fprintf('Upsampling grid with interp2 (this just makes pixels smaller)...\n');
+
+        % Build original grids
+        [xGridOriginal, yGridOriginal] = meshgrid(xValues, yValues);
+
+        % Build fine grids
+        xValuesFine = linspace(xValues(1), xValues(end), numel(xValues) * upscaleFactor);
+        yValuesFine = linspace(yValues(1), yValues(end), numel(yValues) * upscaleFactor);
+        [xGridFine, yGridFine] = meshgrid(xValuesFine, yValuesFine);
+
+        % Interpolate c onto the fine grid
+        interpolationMethod = 'linear'; % robust across MATLAB versions
+        try
+            cMatrixFine = interp2(xGridOriginal, yGridOriginal, cMatrix, ...
+                                  xGridFine, yGridFine, interpolationMethod);
+        catch
+            % Fallback if grid call signature is problematic on older releases
+            cMatrixFine = interp2(cMatrix, upscaleFactor, interpolationMethod);
+            % Create matching fine axes if we had to use the simple form
+            xValuesFine = linspace(xValues(1), xValues(end), size(cMatrixFine,2));
+            yValuesFine = linspace(yValues(1), yValues(end), size(cMatrixFine,1));
+        end
+
+        % Replace with upsampled versions for plotting
+        xValues = xValuesFine;
+        yValues = yValuesFine;
+        cMatrix  = cMatrixFine;
+
+        fprintf('Upsampled sizes -> x: %d, y: %d, c: %d x %d\n', ...
+            numel(xValues), numel(yValues), size(cMatrix,1), size(cMatrix,2));
+    else
+        fprintf('No upsampling (upscaleFactor == 1).\n');
+    end
+
+    % ---------------- Plot ----------------
+    fprintf('Creating heatmap with imagesc(x, y, c)...\n');
+    figure('Color', 'w');
+    imagesc(xValues, yValues, cMatrix);
+    set(gca, 'YDir', 'normal');   % make low y at bottom (not upside-down)
+    xlabel('X');
+    ylabel('Y');
+    title('Theta–Ripple Heatmap (JET)');
+    colormap(jet);
+    colorbar;
+    grid on; box on;
+
+    % ---------------- Save SVG ----------------
+    outputFilePath = fullfile(inputFolder, 'theta_ripple.svg');
+    fprintf('Saving SVG to: %s\n', outputFilePath);
+    try
+        exportgraphics(gcf, outputFilePath, 'ContentType', 'vector', 'BackgroundColor', 'white');
+        fprintf('Saved SVG via exportgraphics.\n');
+    catch
+        print(gcf, outputFilePath, '-dsvg');
+        fprintf('Saved SVG via print fallback.\n');
+    end
+
+    fprintf('--- Done ---\n');
+end
