@@ -26,8 +26,7 @@
 
 %Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 2\PTEN_M13_pten_HF4s1aug1\group_05-10 (1)","C:\Users\Z390\Desktop\IED DATA\Take 2\PTEN_M13_pten_HF4s1aug1\LL_input_2023-08-01_11-37-10_mex_disk_uV.mat")
 
-plot_theta_ripple_simple("C:\Users\info\Desktop\Barry\jeremystats\IED\Theta Graph Data")
-
+convert_fig_to_svg_robust("C:\Users\info\Desktop\Barry\jeremystats\IED\Theta Graph Data\theta.fig")
 
 
 %vacc_global_threshold_v5("D:\PTEN\PTEN\M13_pten\HF4s2aug1\2023-08-01_12-11-26")
