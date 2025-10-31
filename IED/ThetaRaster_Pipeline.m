@@ -31,7 +31,7 @@ function ThetaRaster_Pipeline(inputFolder)
     end
     fprintf('Opening theta.fig: %s\n', candidatePath);
 
-    % ---------------- Open fig invisibly and grab data (like your snippet) ----------------
+    % ---------------- Open fig invisibly and grab data (like Jeremey Does it) ----------------
     figHandle = openfig(candidatePath, 'invisible');
     figure(figHandle); % make current so gcf matches your original snippet
     fig = gcf;         %#ok<NASGU>  % JB: keep variable name as in snippet
