@@ -422,71 +422,64 @@ function plotStackWithIndicators(G, tag, yL, outPng)
             patch('XData',xp,'YData',yp,'FaceColor',[0.3 0.3 0.9],'FaceAlpha',0.25,'EdgeColor','none','HandleVisibility','off');
             plot(ax, tRelMs, mu, 'LineWidth', 1.8);
 
-            % ---- Indicators computed on MEAN waveform within ±metric window (POSITIVE PEAK ONLY) ----
-            muMet = mu(metStart:metEnd);
-            if numel(muMet) >= 3 && all(isfinite(muMet))
-                [amp, pkRel] = max(muMet);   % positive peak amplitude
-                h  = 0.5 * amp;              % half-height
-
-                % crossings (linear interp) on muMet
-                kL = pkRel;
-                while kL > 1 && muMet(kL) >= h, kL = kL - 1; end
-                if kL >= 1 && (kL+1) <= Lmet && muMet(kL) < h && muMet(kL+1) >= h
-                    left_ip = kL + (h - muMet(kL)) / (muMet(kL+1) - muMet(kL));
-                else, left_ip = NaN; end
-
-                kR = pkRel;
-                while kR < Lmet && muMet(kR) >= h, kR = kR + 1; end
-                if (kR-1) >= 1 && kR <= Lmet && muMet(kR-1) >= h && muMet(kR) < h
-                    right_ip = (kR-1) + (h - muMet(kR-1)) / (muMet(kR) - muMet(kR-1));
-                else, right_ip = NaN; end
-
-                if isfinite(left_ip) && isfinite(right_ip)
-                    % convert to time (ms) RELATIVE to center
-                    tPk_ms = ((metStart + pkRel  - 1) - centerIdx) / sfx * 1e3;
-                    tL_ms  = ((metStart + left_ip - 1) - centerIdx) / sfx * 1e3;
-                    tR_ms  = ((metStart + right_ip- 1) - centerIdx) / sfx * 1e3;
-
-                    % Draw only if inside display window
-                    if tL_ms >= tRelMs(1) && tR_ms <= tRelMs(end)
-                        xline(ax, tL_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
-                        xline(ax, tR_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
-                        plot(ax, [tL_ms tR_ms],[0 0], '-', 'Color',[0.85 0.10 0.10], 'LineWidth',1.4, 'HandleVisibility','off');
-                    end
-
-                    if tPk_ms >= tRelMs(1) && tPk_ms <= tRelMs(end)
-                        plot(ax, tPk_ms, amp, 'o', 'MarkerSize', 4.5, ...
-                             'MarkerFaceColor',[0 0 0], 'MarkerEdgeColor','none', 'HandleVisibility','off');
-                    end
-                end
-            end
+            % % ---- Indicators computed on MEAN waveform within ±metric window (POSITIVE PEAK ONLY) ----
+            % muMet = mu(metStart:metEnd);
+            % if numel(muMet) >= 3 && all(isfinite(muMet))
+            %     [amp, pkRel] = max(muMet);   % positive peak amplitude
+            %     h  = 0.5 * amp;              % half-height
+            % 
+            %     % crossings (linear interp) on muMet
+            %     kL = pkRel;
+            %     while kL > 1 && muMet(kL) >= h, kL = kL - 1; end
+            %     if kL >= 1 && (kL+1) <= Lmet && muMet(kL) < h && muMet(kL+1) >= h
+            %         left_ip = kL + (h - muMet(kL)) / (muMet(kL+1) - muMet(kL));
+            %     else, left_ip = NaN; end
+            % 
+            %     kR = pkRel;
+            %     while kR < Lmet && muMet(kR) >= h, kR = kR + 1; end
+            %     if (kR-1) >= 1 && kR <= Lmet && muMet(kR-1) >= h && muMet(kR) < h
+            %         right_ip = (kR-1) + (h - muMet(kR-1)) / (muMet(kR) - muMet(kR-1));
+            %     else, right_ip = NaN; end
+            % 
+            %     if isfinite(left_ip) && isfinite(right_ip)
+            %         % convert to time (ms) RELATIVE to center
+            %         tPk_ms = ((metStart + pkRel  - 1) - centerIdx) / sfx * 1e3;
+            %         tL_ms  = ((metStart + left_ip - 1) - centerIdx) / sfx * 1e3;
+            %         tR_ms  = ((metStart + right_ip- 1) - centerIdx) / sfx * 1e3;
+            % 
+            %         % Draw only if inside display window
+            %         if tL_ms >= tRelMs(1) && tR_ms <= tRelMs(end)
+            %             xline(ax, tL_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
+            %             xline(ax, tR_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
+            %             plot(ax, [tL_ms tR_ms],[0 0], '-', 'Color',[0.85 0.10 0.10], 'LineWidth',1.4, 'HandleVisibility','off');
+            %         end
+            % 
+            %         if tPk_ms >= tRelMs(1) && tPk_ms <= tRelMs(end)
+            %             plot(ax, tPk_ms, amp, 'o', 'MarkerSize', 4.5, ...
+            %                  'MarkerFaceColor',[0 0 0], 'MarkerEdgeColor','none', 'HandleVisibility','off');
+            %         end
+            %     end
+            % end
         end
 
         xline(ax, 0,'--k','LineWidth',0.9); yline(ax, 0,':','Color',[0.7 0.7 0.7]);
         ylim(ax, yL);
 
-        % Title (per-event stats mean±SD)
+       % Title: channel label only (no stats)
         if ~isempty(kept_channels)
             chName = sprintf('row %d (CSC%d)', chList(k), kept_channels(chList(k)));
         else
             chName = sprintf('row %d', chList(k));
         end
-        if isfinite(G.ampMean(k)) && isfinite(G.hwMean(k))
-            ttlTxt = sprintf('%s | amp=%.1f\\pm%.1f \\muV | HW=%.2f\\pm%.2f ms | n=%d', ...
-                chName, G.ampMean(k), G.ampSD(k), G.hwMean(k), G.hwSD(k), G.n(k));
-        else
-            ttlTxt = sprintf('%s | amp=NA | HW=NA | n=%d', chName, G.n(k));
-        end
-        title(ax, ttlTxt, 'FontSize',9, 'FontWeight','normal');
+        title(ax, chName, 'FontSize', 9, 'FontWeight', 'normal');
+
 
         ax.FontSize = 8;
         if k <= nCh - nCols, ax.XTickLabel = []; else, xlabel(ax, 'ms'); end
         ylabel(ax, '\muV');
     end
 
-    sg = sprintf('%s  |  anchor: last-channel max (±%.1f ms)  |  display: \\pm%.1f ms  |  metrics: \\pm%.1f ms  |  channels=%d  |  %s', ...
-                 tag, 1e3*HWanchor/sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, nCh, tagStr);
-    sgtitle(tl, sg, 'FontSize',11,'FontWeight','bold');
+    sgtitle(tl, sprintf('%s', tag), 'FontSize', 11, 'FontWeight', 'bold');
 
     exportgraphics(f, outPng, 'Resolution', 220);
     close(f);
