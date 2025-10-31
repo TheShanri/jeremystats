@@ -222,6 +222,7 @@ out = struct('pngSolid', outSOL, 'pngSputter', outSPU, 'statsCSV', outCSV);
         % -------- Figure (tight alignment) --------
         figH = min(320 + 14*nCh, 3400);
         f = figure('Color','w','Position',[60 60 1200 figH],'Visible','off');
+        colormap(f, jet);
 
         % Single tiledlayout to lock vertical alignment
         tl = tiledlayout(f, 1, 2, 'Padding','compact', 'TileSpacing','compact');
@@ -245,8 +246,9 @@ out = struct('pngSolid', outSOL, 'pngSputter', outSPU, 'statsCSV', outCSV);
         set(ax1,'YDir','reverse', 'YLim',[0.5 nCh+0.5], 'TickDir','out', ...
             'FontSize',9, 'YTick',1:nCh, 'YTickLabel',chanLabels, ...
             'Box','on', 'Layer','top', 'TickLength',[0 0]);
+
         caxis(ax1, [-clim, +clim]);
-        colormap(ax1, jet);
+        %colormap(ax1, jet);
         % Event centers on x
         if sliceThick >= 2
             centers = ( (0:nEvt-1)*sliceThick ) + ceil(sliceThick/2);
@@ -278,7 +280,8 @@ out = struct('pngSolid', outSOL, 'pngSputter', outSPU, 'statsCSV', outCSV);
         linkaxes([ax1 ax2], 'y');
 
         % Shared colorbar (no parent arg, for broader compatibility)
-        cb = colorbar('eastoutside');
+        % Colorbar that reflects the LEFT image's CLim
+        cb = colorbar(ax1, 'eastoutside');
         cb.Label.String = sprintf('CSD units (CLim = \\pm%.2f)', clim);
 
         % Titles (small font to avoid crop) + group-level sgtitle

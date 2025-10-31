@@ -324,11 +324,8 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU);
         end
         set(gca,'YTick',1:nCh,'YTickLabel',L,'FontSize',9);
 
-        ttl = sprintf(['Avg %s  |  events=%d  |  window=\\pm%.1f ms  |  anchor=lastCh max (\\pm%.1f ms)  |  ' ...
-                       'channels=%d  |  CLim=\\pm%.1f \\muV  |  mean peak=%.1f\\pm%.1f \\muV  |  HW=%.2f\\pm%.2f ms'], ...
-                       tag, stats.nEvents, 1e3*HWwin/sfx, 1e3*HWanchor/sfx, nCh, ...
-                       clim, stats.ampMean, stats.ampSD, stats.hwMean, stats.hwSD);
-        title(ttl, 'FontSize', 12, 'FontWeight', 'bold');
+        title(sprintf('Avg %s', tag), 'FontSize', 12, 'FontWeight', 'bold');
+
 
         exportgraphics(f, outPath, 'Resolution', 220);
         close(f);

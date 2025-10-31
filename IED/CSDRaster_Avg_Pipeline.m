@@ -321,11 +321,8 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU);
         end
         set(gca,'YTick',1:nCh,'YTickLabel',L,'FontSize',9);
 
-        ttl = sprintf(['CSD Avg %s  |  events=%d  |  window=\\pm%.1f ms  |  anchor=lastCh max (\\pm%.1f ms)  |  ' ...
-                       'channels=%d  |  CLim=\\pm%.2f  |  CSD peak=%.2f\\pm%.2f  |  HW=%.2f\\pm%.2f ms'], ...
-                       tag, stats.nEvents, 1e3*HWwin/sfx, 1e3*HWanchor/sfx, nCh, ...
-                       clim, stats.pkMean, stats.pkSD, stats.hwMean, stats.hwSD);
-        title(ttl, 'FontSize', 10, 'FontWeight', 'bold');  % smaller font to avoid cropping
+        title(sprintf('CSD Avg %s', tag), 'FontSize', 10, 'FontWeight', 'bold');
+
 
         exportgraphics(f, outPath, 'Resolution', 220);
         close(f);
