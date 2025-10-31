@@ -1,4 +1,4 @@
-function fig2svg(figFilePath)
+unction fig2svg(figFilePath)
 % FIG2SVG Converts a MATLAB .fig file to an SVG file.
 %
 % This function takes the file path of a MATLAB figure (.fig) file,
