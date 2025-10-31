@@ -1,94 +1,110 @@
 function ThetaRaster(inputFolder, varargin)
 % plot_theta_ripple_channels_inverted
 % -------------------------------------------------------------------------
-% Loads x1.mat (1xN), y1.mat (1xM), c1.mat (MxN)
-% Blanks ONLY channels 1 and 64
-% Smooths + upsamples for a clean look
-% Shows all channel labels (1–64)
-% Fixes color scale to [-0.2, 0.2]
-% Tightens x-axis so it starts and ends exactly at data edges
-% Saves EPS (no SVG)
+% Clean + lean:
+% - Blanks ONLY channels 1 and 64 (top/bottom NaN rows)
+% - Gaussian smoothing + bicubic upsampling on INTERIOR (channels 2–63)
+% - Fixed color scale [-0.2, 0.2]
+% - Every channel tick (1–64) visible
+% - Axis tightly fits data in X (no empty left/right space)
+% - Saves EPS (no SVG)
+% - No sloppy chaining; everything spelled out with clear variable names
 % -------------------------------------------------------------------------
 
-    fprintf('\n--- Plot Theta/Ripple Heatmap (Smoothed, EPS, tight X) ---\n');
+    fprintf('\n--- Plot Theta/Ripple Heatmap (Tight, Smoothed, EPS) ---\n');
     fprintf('Input folder: %s\n', inputFolder);
 
-    % ---------- Simple options ----------
-    parser = inputParser;
-    addParameter(parser, 'enableSmoothing', true);
-    addParameter(parser, 'gaussianSigma', 0.75);
-    addParameter(parser, 'upsampleFactor', 3);
-    addParameter(parser, 'colormapName', 'jet');
-    addParameter(parser, 'titleText', 'Theta–Ripple Heatmap — Channel 64 at Bottom');
-    parse(parser, varargin{:});
+    % -------- Simple knobs --------
+    gaussianSigma  = 0.75;     % smoothing amount (in pixels)
+    upsampleFactor = 3;        % 1=no upsample; 2–4 looks nice
+    colormapName   = 'jet';    % try 'turbo' if you prefer
+    colorScale     = [-0.2, 0.2];
+    titleText      = 'Theta–Ripple Heatmap — Channel 64 at Bottom';
 
-    enableSmoothing = logical(parser.Results.enableSmoothing);
-    gaussianSigma   = parser.Results.gaussianSigma;
-    upsampleFactor  = parser.Results.upsampleFactor;
-    colormapName    = char(parser.Results.colormapName);
-    titleText       = char(parser.Results.titleText);
+    % -------- Load data (no chaining) --------
+    xFile = load(fullfile(inputFolder, 'x1.mat'));
+    xFieldNames = fieldnames(xFile);
+    xValues = xFile.(xFieldNames{1});
+    xValues = xValues(:).';  % force row vector
 
-    % ---------- Load data ----------
-    xStruct = load(fullfile(inputFolder, 'x1.mat'));  
-    yStruct = load(fullfile(inputFolder, 'y1.mat'));  
-    cStruct = load(fullfile(inputFolder, 'c1.mat'));  
-    xValues = xStruct.(fieldnames(xStruct){1});
-    yValues = yStruct.(fieldnames(yStruct){1});
-    cMatrix = cStruct.(fieldnames(cStruct){1});
+    yFile = load(fullfile(inputFolder, 'y1.mat'));
+    yFieldNames = fieldnames(yFile);
+    yValues = yFile.(yFieldNames{1});
+    yValues = yValues(:).';  % force row vector
 
-    % Ensure row vectors
-    xValues = xValues(:).';
-    yValues = yValues(:).';
+    cFile = load(fullfile(inputFolder, 'c1.mat'));
+    cFieldNames = fieldnames(cFile);
+    cMatrix = cFile.(cFieldNames{1});
 
-    % Fix matrix orientation if needed
-    if ~isequal(size(cMatrix), [numel(yValues), numel(xValues)])
-        if isequal(size(cMatrix), [numel(xValues), numel(yValues)])
-            cMatrix = cMatrix.';
+    fprintf('Loaded sizes -> x:%d | y:%d | c:%dx%d\n', ...
+        numel(xValues), numel(yValues), size(cMatrix,1), size(cMatrix,2));
+
+    % -------- Ensure orientation: cMatrix is [numel(y) x numel(x)] --------
+    expectedRows = numel(yValues);
+    expectedCols = numel(xValues);
+
+    if ~isequal(size(cMatrix), [expectedRows, expectedCols])
+        if isequal(size(cMatrix), [expectedCols, expectedRows])
+            fprintf('Transposing cMatrix to [numel(y) x numel(x)]...\n');
+            cMatrix = cMatrix.'; %#ok<UDIM>
         else
-            error('Matrix size mismatch.');
+            error('Matrix size mismatch: cMatrix must be [%d x %d].', expectedRows, expectedCols);
         end
     end
 
-    % ---------- Smooth + upsample interior (channels 2–63) ----------
-    interiorMatrix = cMatrix;
+    % -------- Smooth + upsample INTERIOR (channels 2–63) --------
+    fprintf('Smoothing interior with imgaussfilt (sigma=%.3f)...\n', gaussianSigma);
+    interiorMatrix = imgaussfilt(cMatrix, gaussianSigma);
 
-    if enableSmoothing
-        fprintf('Applying Gaussian smoothing (σ=%.3f)...\n', gaussianSigma);
-        interiorMatrix = imgaussfilt(interiorMatrix, gaussianSigma);
-    end
     if upsampleFactor > 1
-        fprintf('Upsampling %.1fx (bicubic)...\n', upsampleFactor);
+        fprintf('Upsampling interior by x%.1f (bicubic)...\n', upsampleFactor);
         interiorMatrix = imresize(interiorMatrix, upsampleFactor, 'bicubic');
     end
 
-    % ---------- Add NaN rows for channel 1 + 64 ----------
-    nanRow = nan(1, size(interiorMatrix, 2));
-    fullMatrix = [nanRow; interiorMatrix; nanRow];
+    % -------- Add exactly one NaN row on top (ch1) and bottom (ch64) --------
+    fprintf('Adding NaN rows for channel 1 (top) and 64 (bottom)...\n');
+    numberOfColumns = size(interiorMatrix, 2);
+    nanRow = nan(1, numberOfColumns);
+    fullMatrix = [nanRow; interiorMatrix; nanRow];   % only 1 and 64 are blank
 
-    % ---------- Plot ----------
-    fprintf('Plotting with fixed color scale [-0.2, 0.2]...\n');
-    figure('Color','w','Position',[100 100 900 700]);
-    imagesc(xValues, 1:64, fullMatrix);
-    set(gca,'YDir','reverse');   % 64 at bottom
-    xlabel('X','FontSize',12);
-    ylabel('Channel #','FontSize',11);
-    title(titleText,'FontSize',14,'FontWeight','bold');
+    % -------- Build axes --------
+    channelNumbers = 1:64;
+
+    % -------- Plot (map image to exact data extents; no X-margin) --------
+    fprintf('Plotting with fixed color scale [%g, %g]...\n', colorScale(1), colorScale(2));
+    figureHandle = figure('Color','w','Position',[100 100 900 700]);
+
+    % IMPORTANT: use XData/YData as EXTENTS so upsampled size doesn't matter
+    xExtent = [xValues(1), xValues(end)];
+    yExtent = [channelNumbers(1), channelNumbers(end)];
+
+    imagesc('XData', xExtent, 'YData', yExtent, 'CData', fullMatrix);
+    set(gca, 'YDir', 'reverse');     % channel 64 at bottom
+
     colormap(colormapName);
+    caxis(colorScale);
     colorbar;
-    caxis([-0.2 0.2]);
-    yticks(1:64);
-    yticklabels(string(1:64));
-    set(gca,'FontSize',8,'TickDir','out','LineWidth',1);
+
+    xlabel('X');
+    ylabel('Channel #');
+    title(titleText, 'FontWeight','bold');
+
+    % Every channel labeled
+    yticks(channelNumbers);
+    yticklabels(string(channelNumbers));
+    set(gca, 'FontSize', 8, 'TickDir', 'out', 'LineWidth', 1);
     grid on; box on;
 
-    % ---------- Tighten x-axis ----------
-    axis tight;  % trims whitespace exactly to data edges
-    xlim([xValues(1) xValues(end)]);  % ensures x starts/ends with data
+    % Tight to data: exact start/end, no empty left/right
+    xlim(xExtent);
+    ylim([1 64]);
 
-    % ---------- Save EPS ----------
+    drawnow;
+
+    % -------- Save EPS --------
     epsFilePath = fullfile(inputFolder, 'theta_ripple_channels_inverted.eps');
     fprintf('Saving EPS to: %s\n', epsFilePath);
-    exportgraphics(gcf, epsFilePath, 'ContentType','vector','BackgroundColor','white');
+    exportgraphics(figureHandle, epsFilePath, 'ContentType', 'vector', 'BackgroundColor', 'white');
 
     fprintf('--- Done ---\n\n');
 end
