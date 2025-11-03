@@ -92,6 +92,12 @@ HWwin    = max(1, round(winHWms    * sfx));  % ±display half-width
 HWanchor = max(1, round(anchorHWms * sfx));  % ±anchor search
 tRelMs   = (-HWwin:HWwin) / sfx * 1e3; %#ok<NASGU>
 centerIdx= HWwin + 1;
+% Indices to average the "center slice" over [-1, 0] ms
+i0_slice = centerIdx + round(-1e-3 * sfx);  % -1 ms
+i1_slice = centerIdx;                       %  0 ms
+i0_slice = max(1, min(2*HWwin+1, i0_slice));
+i1_slice = max(1, min(2*HWwin+1, i1_slice));
+
 
 fprintf('CSD Center Slices PIPELINE: sfx=%.1f Hz | window ±%.1f ms | anchor: lastCh max (±%.1f ms)\n', ...
     sfx, 1e3*HWwin/sfx, 1e3*HWanchor/sfx);
@@ -200,7 +206,7 @@ out = struct('pngSolid', outSOL, 'pngSputter', outSPU, 'statsCSV', outCSV);
             C = computeCSD(Y); % channels x time
 
             % Slice at t = 0 ms
-            S(:,ii) = C(:,centerIdx);
+            S(:,ii) = mean(C(:, i0_slice:i1_slice), 2, 'omitnan');
             used(ii) = true;
         end
 
@@ -295,8 +301,8 @@ out = struct('pngSolid', outSOL, 'pngSputter', outSPU, 'statsCSV', outCSV);
         % cb.Label.String = sprintf('CSD units (CLim = \\pm%.2f)', clim);
 
         % Titles (small font to avoid crop) + group-level sgtitle
-        title(ax1, sprintf('%s — CSD slices at 0 ms (n=%d)', tag, nEvt), 'FontSize',10, 'FontWeight','bold');
-        title(ax2, sprintf('%s — Vertical waveform @ 0 ms (mean in black)', tag), 'FontSize',10, 'FontWeight','bold');
+        title(ax1, sprintf('%s — CSD slices avg [-1, 0] ms (n=%d)', tag, nEvt), 'FontSize',10, 'FontWeight','bold');
+        title(ax2, sprintf('%s — Vertical waveform (mean in black)', tag), 'FontSize',10, 'FontWeight','bold');
         sg = sprintf('%s  |  align: last-channel max (\\pm%.1f ms)  |  window: \\pm%.1f ms  |  channels=%d', ...
             tag, 1e3*HWanchor/sfx, 1e3*HWwin/sfx, nCh);
         sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
