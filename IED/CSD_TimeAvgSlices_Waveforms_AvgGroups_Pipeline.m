@@ -3,7 +3,7 @@ function res = CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline(inputFolder, dataM
 % Build per-group figures with:
 %   LEFT  : per-event **time-averaged** CSD columns (channels × events, thickened)
 %   RIGHT : vertical waveforms (each event in gray; group mean in black)
-% Time-average window defaults to [-5, +15] ms around the alignment anchor.
+% Time-average window defaults to [0, +15] ms around the alignment anchor.
 %
 % RETURNS:
 %   res.pngSolid, res.pngSputter  : output figure PNGs (or "" if not created)
@@ -25,7 +25,7 @@ p.addParameter('scaleToMicroV', 1, @(x)isnumeric(x) && all(isfinite(x)) && all(x
 
 p.addParameter('winHalfWidthMs',    20e-3, @(x)isfinite(x)&&x>0);   % ±20 ms around anchor
 p.addParameter('anchorHalfWidthMs',  5e-3, @(x)isfinite(x)&&x>0);   % ±5 ms anchor search
-p.addParameter('avgStartMs',        -5e-3, @(x)isfinite(x));        % time-avg start (rel to anchor)
+p.addParameter('avgStartMs',         0e-3, @(x)isfinite(x));        % time-avg start (rel to anchor)
 p.addParameter('avgEndMs',          15e-3, @(x)isfinite(x));        % time-avg end   (rel to anchor)
 
 p.addParameter('sliceThickness', 6, @(x)isfinite(x) && x>=1 && mod(x,1)==0);
