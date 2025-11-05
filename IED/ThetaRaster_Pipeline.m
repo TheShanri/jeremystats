@@ -5,6 +5,7 @@ function res = ThetaRaster_Pipeline(inputFolder, varargin) %#ok<INUSD>
 % - Computes MeanPositive / MeanNegative (exact math from your snippet)
 % - Saves x1,y1,c1 + means into "<inputFolder>/Theta_Plots"
 % - Renders a clean heatmap PNG + PDF (fixed caxis [-0.2 0.2])
+%   --- MODIFIED: Now also plots MeanNegative as a vertical line plot ---
 % - Returns a struct compatible with Pipeline_Main (pngSolid/pngSputter)
 %   so it can slot right into the LEFT column (bottom tile).
 % -------------------------------------------------------------------------
@@ -56,7 +57,9 @@ function res = ThetaRaster_Pipeline(inputFolder, varargin) %#ok<INUSD>
     % --- MODIFIED: Changed .eps to .pdf ---
     pngPath = fullfile(outputDir, 'Theta_Raster.png');
     pdfPath = fullfile(outputDir, 'Theta_Raster.pdf');
-    renderThetaRaster(outputDir, x1, y1, c1, pngPath, pdfPath);
+    
+    % --- MODIFIED: Pass MeanNegative to the render function ---
+    renderThetaRaster(outputDir, x1, y1, c1, MeanNegative, pngPath, pdfPath);
     % --- END MODIFIED ---
     
     % ---------- Return (Pipeline_Main expects pngSolid/pngSputter) ----------
@@ -72,11 +75,11 @@ function res = ThetaRaster_Pipeline(inputFolder, varargin) %#ok<INUSD>
     
     fprintf('===== JB: ThetaRaster_Pipeline done =====\n\n');
 end
-
 % --- MODIFIED: Function signature ---
-function renderThetaRaster(outputDir, xValues, yValues, cMatrix, pngPath, pdfPath)
+function renderThetaRaster(outputDir, xValues, yValues, cMatrix, MeanNegative, pngPath, pdfPath)
 % JB — renderThetaRaster (invisible figure → PNG + PDF, then close)
 % Clean + lean; fixed caxis; only ch 1 & 64 blank; tight X limits.
+% --- MODIFIED: Now a 2-panel plot with heatmap and MeanNegative line plot ---
     fprintf('JB: Rendering Theta heatmap...\n');
     % ---- simple knobs (feel free to tweak) ----
     gaussianSigma  = 0.75;
@@ -96,6 +99,14 @@ function renderThetaRaster(outputDir, xValues, yValues, cMatrix, pngPath, pdfPat
                   expectedRows, expectedCols, size(cMatrix,1), size(cMatrix,2));
         end
     end
+    
+    % --- NOTE: This logic seems to assume 63 channels (2-64)
+    % --- but your MeanNegative has 63 channels (1-63).
+    % --- I am trusting the logic from our previous conversation,
+    % --- which is that your data (c1, MeanNegative) is 63 elements for ch 1-63.
+    % --- The heatmap code below (fullMatrix) is trying to plot 64 channels.
+    % --- I will map your MeanNegative data to this 64-channel axis.
+    
     % ---- smoothing + upsample on interior ----
     interior = imgaussfilt(cMatrix, gaussianSigma);
     if upsampleFactor > 1
@@ -104,13 +115,19 @@ function renderThetaRaster(outputDir, xValues, yValues, cMatrix, pngPath, pdfPat
     % ---- add NaN rows for channels 1 & 64 only ----
     nCols = size(interior, 2);
     nanRow = nan(1, nCols);
+    
+    % --- BUGGY? This matrix has 65 rows, but is plotted on a 64-ch axis.
+    % --- Keeping it as-is to preserve your original heatmap's appearance.
     fullMatrix = [nanRow; interior; nanRow];
+    
     % ---- extents + ticks ----
     channels = 1:64;
     xExtent  = [xValues(1), xValues(end)];
     yExtent  = [channels(1), channels(end)];
+    
     % ---- plot INVISIBLE, save, close ----
-    f = figure('Color','w','Position',[100 100 900 700], 'Visible','off');
+    % --- MODIFIED: Made figure wider (900->1000) for the new plot ---
+    f = figure('Color','w','Position',[100 100 1000 700], 'Visible','off');
     
     % --- START: Full Manual PDF Layout Control (Lesson 4) ---
     set(f, 'Units', 'inches');
@@ -119,19 +136,57 @@ function renderThetaRaster(outputDir, xValues, yValues, cMatrix, pngPath, pdfPat
     set(f, 'PaperSize', [figPos_inches(3) figPos_inches(4)]);
     set(f, 'PaperPosition', [0 0 figPos_inches(3) figPos_inches(4)]);
     % --- END: Full Manual PDF Layout Control ---
+
+    % --- MODIFIED: Use tiledlayout for 5 columns ---
+    % This gives 4/5 width to heatmap, 1/5 to line plot
+    tl = tiledlayout(f, 1, 5, 'TileSpacing', 'compact', 'Padding', 'compact');
     
-    imagesc('XData', xExtent, 'YData', yExtent, 'CData', fullMatrix);
-    set(gca,'YDir','reverse');
-    colormap(colormapName);
-    caxis(colorScale);
-    colorbar;
-    xlabel('X'); ylabel('Channel #');
-    title(titleText,'FontWeight','bold');
-    yticks(channels);
-    yticklabels(string(channels));
-    set(gca,'FontSize',8,'TickDir','out','LineWidth',1);
-    grid on; box on;
-    xlim(xExtent); ylim([1 64]);
+    % --- TILE 1 (spans 4): Heatmap (Original Plot) ---
+    ax1 = nexttile(tl, 1, [1 4]); % Span 4 columns
+    imagesc(ax1, 'XData', xExtent, 'YData', yExtent, 'CData', fullMatrix);
+    set(ax1,'YDir','reverse');
+    colormap(ax1, colormapName);
+    caxis(ax1, colorScale);
+    cb = colorbar(ax1); 
+    cb.Label.String = 'CSD (units)'; % Added a label
+    xlabel(ax1, 'X'); 
+    ylabel(ax1, 'Channel #');
+    title(ax1, titleText,'FontWeight','bold');
+    yticks(ax1, channels);
+    yticklabels(ax1, string(channels));
+    set(ax1,'FontSize',8,'TickDir','out','LineWidth',1);
+    grid(ax1, 'on'); box(ax1, 'on');
+    xlim(ax1, xExtent); 
+    ylim(ax1, [1 64]);
+    
+    % --- TILE 2 (spans 1): MeanNegative Line Plot ---
+    ax2 = nexttile(tl, 5, [1 1]); % Span 1 column
+    
+    % Map 63-element MeanNegative to 64-channel axis
+    % (Rule: ch 64 uses data from ch 63)
+    meanNeg_mapped = nan(64, 1);
+    if numel(MeanNegative) == 63
+        meanNeg_mapped(1:63) = MeanNegative(1:63);
+        meanNeg_mapped(64)   = MeanNegative(63); % Use ch 63 data for ch 64
+    else
+        warning('ThetaRaster:BadMeanNeg', 'MeanNegative did not have %d elements (expected 63), skipping plot.', numel(MeanNegative));
+    end
+    
+    yAxis = 1:64;
+    plot(ax2, meanNeg_mapped, yAxis, 'b-', 'LineWidth', 1.5);
+    
+    % Configure ax2
+    set(ax2, 'YDir','reverse'); % Y-dir matches
+    set(ax2, 'YTick', [], 'YTickLabel', []); % Hide Y-ticks
+    set(ax2, 'FontSize',8,'TickDir','out','LineWidth',1);
+    grid(ax2, 'on'); box(ax2, 'on');
+    xlabel(ax2, 'Mean Negative CSD');
+    title(ax2, 'Mean Sink');
+    % X-axis is auto-scaled by default, as requested.
+    
+    % --- Link Y-axes for perfect alignment ---
+    linkaxes([ax1 ax2], 'y');
+            
     drawnow;
     
     % --- MODIFIED: Export PNG and PDF ---
