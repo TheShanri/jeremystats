@@ -1,4 +1,4 @@
-function Pipeline_Main(inputFolder, dataMatPath, varargin)
+function Pipeline_Main(inputFolder, varargin)
 % Pipeline_Main — runs all sub-pipelines, builds TWO compact triptychs
 % (SOLID & SPUTTER) at native resolution, plus a merged stats CSV.
 %
@@ -8,14 +8,29 @@ function Pipeline_Main(inputFolder, dataMatPath, varargin)
 %   RIGHT : [CSDRaster_Avg, CSD_TimeAvgSlices_Waveforms_AvgGroups]          (stacked vertically)
 %
 % Robust to missing images/CSVs (warns and continues).
-
 % ---------- 0. INITIAL SETUP & LOGGING ----------
 fprintf('\n========================================================\n');
 fprintf('===== Pipeline_Main STARTING =====\n');
 fprintf('========================================================\n');
 fprintf('Timestamp: %s\n', datetime('now'));
 fprintf('Input Folder: %s\n', inputFolder);
-fprintf('Data MAT Path: %s\n', dataMatPath);
+
+% --- MODIFICATION: Auto-detect .mat file in PARENT folder ---
+[parentFolder, ~] = fileparts(inputFolder);
+matFiles = dir(fullfile(parentFolder, '*.mat'));
+
+if isempty(matFiles)
+    fprintf('\n  ERROR: No .mat file found in parent directory: %s\n', parentFolder);
+    fprintf('  Pipeline stopping.\n');
+    fprintf('========================================================\n');
+    return; % Stop the function
+end
+
+% Use the first .mat file found
+dataMatPath = fullfile(matFiles(1).folder, matFiles(1).name);
+fprintf('Data MAT Path: %s (Auto-detected in parent folder)\n', dataMatPath);
+% --- END MODIFICATION ---
+
 
 % ---------- Output hub ----------
 masterOutDir = fullfile(inputFolder, 'Pipeline Output');
