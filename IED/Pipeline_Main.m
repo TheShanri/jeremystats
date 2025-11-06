@@ -17,9 +17,13 @@ fprintf('Input Folder: %s\n', inputFolder);
 
 % --- MODIFICATION: Auto-detect .mat file INSIDE inputFolder ---
 matFiles = dir(fullfile(inputFolder, '*.mat'));
+% --- Exclude ets.mat from this search ---
+isEts = startsWith({matFiles.name}, 'ets.mat', 'IgnoreCase', true);
+matFiles = matFiles(~isEts);
 
 if isempty(matFiles)
-    fprintf('\n  ERROR: No .mat file found inside input folder: %s\n', inputFolder);
+    fprintf('\n  ERROR: No data .mat file found inside input folder: %s\n', inputFolder);
+    fprintf('  (Note: ets.mat is ignored here, looking for the main data file.)\n');
     fprintf('  Pipeline stopping.\n');
     fprintf('========================================================\n');
     return; % Stop the function
@@ -29,7 +33,6 @@ end
 dataMatPath = fullfile(matFiles(1).folder, matFiles(1).name);
 fprintf('Data MAT Path: %s (Auto-detected inside input folder)\n', dataMatPath);
 % --- END MODIFICATION ---
-
 
 % ---------- Output hub ----------
 masterOutDir = fullfile(inputFolder, 'Pipeline Output');
@@ -43,6 +46,44 @@ fprintf('Master SOLID PNG: %s\n', triptychSOLID);
 fprintf('Master SPUTTER PNG: %s\n', triptychSPUTTER);
 fprintf('Master STATS CSV: %s\n', masterCSV);
 fprintf('--------------------------------------------------------\n\n');
+
+
+% --- NEW: Auto-convert ets.mat if no .xlsx file is present ---
+fprintf('===== [A] Checking for event .xlsx file... =====\n');
+etsMatPath = fullfile(inputFolder, 'ets.mat');
+excelFiles = dir(fullfile(inputFolder, '*.xlsx'));
+
+if ~isempty(excelFiles)
+    fprintf('  [A] Found existing .xlsx file: %s\n', excelFiles(1).name);
+    fprintf('  [A] Skipping ets.mat conversion.\n');
+elseif isfile(etsMatPath)
+    fprintf('  [A] No .xlsx file found. Found %s. Attempting conversion...\n', etsMatPath);
+    try
+        data = load(etsMatPath);
+        f = fieldnames(data);
+        if isempty(f)
+            error('ets.mat file is empty or contains no variables.');
+        end
+        ets_data = data.(f{1}); % Get first variable, whatever its name
+        
+        if size(ets_data, 2) ~= 2
+            error('Loaded data from ets.mat does not have 2 columns.');
+        end
+        
+        T = table(ets_data(:,1), ets_data(:,2), 'VariableNames', {'onsamp', 'offsamp'});
+        targetExcelPath = fullfile(inputFolder, 'ets_converted_events.xlsx');
+        writetable(T, targetExcelPath);
+        fprintf('  [A] SUCCESS: Converted %s to %s\n', 'ets.mat', 'ets_converted_events.xlsx');
+    catch ME
+        fprintf('  [A] FAILED: Could not convert ets.mat. Pipeline may fail.\n');
+        warning(ME.identifier, 'ets.mat conversion failed: %s', ME.message);
+    end
+else
+    fprintf('  [A] No .xlsx file found and no ets.mat file found.\n');
+    fprintf('  [A] Pipeline will likely fail if sub-modules require event files.\n');
+end
+fprintf('--------------------------------------------------------\n');
+% --- END NEW SECTION ---
 
 
 % ---------- 0) ThetaRaster (LEFT, bottom) ----------
