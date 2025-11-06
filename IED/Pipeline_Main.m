@@ -15,12 +15,11 @@ fprintf('========================================================\n');
 fprintf('Timestamp: %s\n', datetime('now'));
 fprintf('Input Folder: %s\n', inputFolder);
 
-% --- MODIFICATION: Auto-detect .mat file in PARENT folder ---
-[parentFolder, ~] = fileparts(inputFolder);
-matFiles = dir(fullfile(parentFolder, '*.mat'));
+% --- MODIFICATION: Auto-detect .mat file INSIDE inputFolder ---
+matFiles = dir(fullfile(inputFolder, '*.mat'));
 
 if isempty(matFiles)
-    fprintf('\n  ERROR: No .mat file found in parent directory: %s\n', parentFolder);
+    fprintf('\n  ERROR: No .mat file found inside input folder: %s\n', inputFolder);
     fprintf('  Pipeline stopping.\n');
     fprintf('========================================================\n');
     return; % Stop the function
@@ -28,7 +27,7 @@ end
 
 % Use the first .mat file found
 dataMatPath = fullfile(matFiles(1).folder, matFiles(1).name);
-fprintf('Data MAT Path: %s (Auto-detected in parent folder)\n', dataMatPath);
+fprintf('Data MAT Path: %s (Auto-detected inside input folder)\n', dataMatPath);
 % --- END MODIFICATION ---
 
 
