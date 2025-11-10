@@ -13,6 +13,14 @@ function out = Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline(inputFolder, dat
 %
 % Returns struct OUT with fields:
 %   pngSolid, pngSputter, pdfSolid, pdfSputter, statsCSV (unused -> "")
+%
+% --- NEW ANCHOR PARAMETERS ---
+%   'anchorMidpoint' (false): If true, skips peak search and uses the
+%                             event's midpoint as the anchor.
+%   'anchorChannel'  (0):     Matrix row to use for anchor search.
+%                             If 0, defaults to last *selected* channel.
+%   'anchorPolarity' ('pos'): Type of peak to find: 'pos', 'neg', or 'abs'.
+% -----------------------------
 
 % ---------- Args ----------
 p = inputParser;
@@ -25,6 +33,13 @@ p.addParameter('preferEvenRows', true, @(x)islogical(x)||ismember(x,[0 1]));
 p.addParameter('scaleToMicroV', 1, @(x) isnumeric(x) && all(isfinite(x)) && all(x>0));
 % Alignment
 p.addParameter('anchorHalfWidthMs', 5e-3, @(x)isfinite(x)&&x>0);
+
+% --- NEW ANCHOR PARAMETERS ---
+p.addParameter('anchorMidpoint', false, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('anchorChannel', 0, @(x)isscalar(x)&&isnumeric(x)&&x>=0);
+p.addParameter('anchorPolarity', 'pos', @(s) any(validatestring(s, {'pos','neg','abs'})));
+% --- END NEW PARAMETERS ---
+
 % Spectrogram params (UPDATED defaults)
 p.addParameter('specWinMs',   10e-3, @(x)isfinite(x)&&x>0);   % 10 ms
 p.addParameter('specOverlap', 0.50,  @(x)isfinite(x)&&x>=0&&x<1);
@@ -48,6 +63,13 @@ chUser          = p.Results.channelIndices;
 preferEven      = p.Results.preferEvenRows;
 scaleToMicroV   = p.Results.scaleToMicroV;
 anchorHWms      = p.Results.anchorHalfWidthMs;
+
+% --- NEW ANCHOR PARAMETERS ---
+anchorMidpoint = p.Results.anchorMidpoint;
+anchorChannel  = p.Results.anchorChannel;
+anchorPolarity = p.Results.anchorPolarity;
+% --- END NEW PARAMETERS ---
+
 specWinMs       = p.Results.specWinMs;
 specOverlap     = p.Results.specOverlap;
 nfftOpt         = p.Results.nfft;
@@ -141,6 +163,7 @@ else
     error('No valid channels to select from.');
 end
 nCh = numel(chSel);
+fprintf('Selected %d channels for Spectrogram: %s\n', nCh, mat2str(chSel));
 
 % ---------- Render 3rd event (or 1st) of each group ----------
 % --- MODIFIED: Default to 1st event if 3rd is not available ---
@@ -183,28 +206,78 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         % --- Window: ±100 ms ---
         HW = max(1, round(0.100 * sfx));
         tRelMs = (-HW:HW) / sfx * 1e3;
-        % --- Anchor by last selected channel positive peak within ±anchor window ---
+        
+        % --- Check event bounds ---
         if e < 1 || e > NrowsXL, warning('%s Evt %d: out of range.', tag, e); return; end
         s0_ev = round(onSamp(e)); s1_ev = round(offSamp(e));
         if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev)
             warning('%s Evt %d: bad on/off.', tag, e); return;
         end
+        
         HWanchor = max(1, round(anchorHWms * sfx));
         ancMid = round((s0_ev + s1_ev)/2);
-        s0a = max(1, ancMid - HWanchor);
-        s1a = min(nSamp, ancMid + HWanchor);
-        refCh = chSel(end);
-        fprintf('%s Evt %d: anchoring on LAST channel (row %d)\n', tag, e, refCh);
-        y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
-        if isempty(y0) || all(~isfinite(y0))
-            warning('%s Evt %d: no finite data for anchor.', tag, e); return;
+        
+        anchorDesc = ""; % For sgtitle
+        
+        % --- MODIFIED ANCHOR LOGIC ---
+        if anchorMidpoint == true
+            % Option 1: Use midpoint, skip search
+            anchor = ancMid;
+            anchorDesc = "Event Midpoint";
+        else
+            % Option 2: Perform peak-finding search
+            
+            % Determine reference channel
+            if anchorChannel == 0
+                refCh = chSel(end); % Default: last *selected* channel
+            else
+                % Use user-specified channel, with validation
+                if anchorChannel < 1 || anchorChannel > nRowsAll || ~any(chSel == anchorChannel)
+                    warning('Invalid or unselected anchorChannel %d. Reverting to last selected channel (%d).', anchorChannel, chSel(end));
+                    refCh = chSel(end);
+                else
+                    refCh = anchorChannel; % Use specified, valid row
+                end
+            end
+            
+            anchorDesc = sprintf("%s peak on row %d (±%.1f ms)", ...
+                                 anchorPolarity, refCh, 1e3*anchorHWms);
+            
+            % Define search window
+            s0a = max(1, ancMid - HWanchor);
+            s1a = min(nSamp, ancMid + HWanchor);
+            
+            % Get data from reference channel
+            scRef = scaleVec(refCh);
+            y0 = double(mf.d(refCh, s0a:s1a)) * scRef;
+            
+            if isempty(y0) || all(~isfinite(y0))
+                warning('%s Evt %d: no finite data for anchor.', tag, e); return;
+            end
+            
+            % Find peak based on polarity
+            switch anchorPolarity
+                case 'pos'
+                    [~, k_rel] = max(y0);
+                case 'neg'
+                    [~, k_rel] = min(y0);
+                case 'abs'
+                    [~, k_rel] = max(abs(y0));
+                otherwise
+                    [~, k_rel] = max(y0); % Default to pos
+            end
+            
+            anchor = s0a + k_rel - 1;
         end
-        [~, k_rel] = max(y0);
-        anchor = s0a + k_rel - 1;
+        
+        fprintf('%s Evt %d: Align: %s\n', tag, e, anchorDesc);
+        % --- END MODIFIED ANCHOR LOGIC ---
+        
         s0 = anchor - HW; s1 = anchor + HW;
         if s0 < 1 || s1 > nSamp
             warning('%s Evt %d: window out of bounds.', tag, e); return;
         end
+        
         % --- Collect waveforms for GLOBAL y-limits ---
         rob = 0;
         for ci = 1:nCh
@@ -222,6 +295,7 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
             yMax = yLimMicroV;
         end
         yL_global = [-yMax, +yMax];
+        
         % --- Spectrogram params ---
         specWinSamp     = max(8, round(specWinMs * sfx));
         specOverlapSamp = max(0, min(specWinSamp-1, round(specOverlap * specWinSamp)));
@@ -231,6 +305,7 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
             nfft = nfftOpt;
         end
         fMax = min(fMaxHz, sfx/2);
+        
         % --- Precompute CLim across selected channels ---
         allP = [];
         Pane = cell(nCh,1);
@@ -251,6 +326,7 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         allP = allP(isfinite(allP));
         if isempty(allP), pHi = 0; else, pHi = prctile(allP, powerUpperPct); end
         pLo = pHi - powerDynRange;
+        
         % ---------- Figure ----------
         rowsPerChan = 2;                 % waveform + spectrogram
         rowsTotal   = rowsPerChan * nCh;
@@ -312,8 +388,10 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         % One colorbar is enough (right side)
         cb = colorbar('eastoutside');
         cb.Label.String = sprintf('Power (dB) | CLim [%.1f, %.1f]', pLo, pHi);
-        sg = sprintf('%s | %s | anchor: last-selected max (\\pm%.1f ms) | Window: \\pm100 ms | STFT win=%.1f ms ov=%.0f%% nfft=%d | chans=%s', ...
-                     tag, baseName, 1e3*HWanchor/sfx, 1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, mat2str(chSel));
+        
+        % --- MODIFIED SGTITLE ---
+        sg = sprintf('%s | %s | align: %s | Window: \\pm100 ms | STFT win=%.1f ms ov=%.0f%% nfft=%d | chans=%s', ...
+                     tag, baseName, anchorDesc, 1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, mat2str(chSel));
         sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
         
         % --- MODIFIED: Export PNG and PDF ---

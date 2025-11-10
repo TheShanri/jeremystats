@@ -7,7 +7,14 @@ function out = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMat
 %
 % OUTPUT struct:
 %   out.pngSolid, out.pngSputter, out.pdfSolid, out.pdfSputter, out.statsCSV
-
+%
+% --- NEW ANCHOR PARAMETERS ---
+%   'anchorMidpoint' (false): If true, skips peak search and uses the
+%                             event's midpoint as the anchor.
+%   'anchorChannel'  (0):     Matrix row to use for anchor search.
+%                             If 0, defaults to last channel in chList.
+%   'anchorPolarity' ('pos'): Type of peak to find: 'pos', 'neg', or 'abs'.
+% -----------------------------
 % ---------- Args ----------
 p = inputParser;
 p.addRequired('inputFolder', @(s)ischar(s)||isstring(s));
@@ -22,6 +29,13 @@ p.addParameter('robustPct',    99.5, @(x) isfinite(x) && x>0 && x<100);
 p.addParameter('padFrac',       0.12, @(x) isfinite(x) && x>=0 && x<=0.5);
 p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
 p.addParameter('absoluteClim', 1000, @(x) isempty(x) || (isscalar(x) && x>0)); 
+
+% --- NEW ANCHOR PARAMETERS ---
+p.addParameter('anchorMidpoint', false, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('anchorChannel', 0, @(x)isscalar(x)&&isnumeric(x)&&x>=0);
+p.addParameter('anchorPolarity', 'pos', @(s) any(validatestring(s, {'pos','neg','abs'})));
+% --- END NEW PARAMETERS ---
+
 p.parse(inputFolder, dataMatPath, varargin{:});
 inputFolder   = string(p.Results.inputFolder);
 dataMatPath   = string(p.Results.dataMatPath);
@@ -36,22 +50,25 @@ padFrac       = p.Results.padFrac;
 maxEventsPer  = p.Results.maxEventsPerGroup;
 absoluteClim  = p.Results.absoluteClim; 
 
+% --- NEW ANCHOR PARAMETERS ---
+anchorMidpoint = p.Results.anchorMidpoint;
+anchorChannel  = p.Results.anchorChannel;
+anchorPolarity = p.Results.anchorPolarity;
+% --- END NEW PARAMETERS ---
+
 % ---------- Layout ----------
 solidDir   = fullfile(inputFolder, "Solid");
 sputterDir = fullfile(inputFolder, "Sputter");
 assert(isfolder(solidDir),   'Missing folder: %s', solidDir);
 assert(isfolder(sputterDir), 'Missing folder: %s', sputterDir);
-
 if excelPath == ""
     xl = dir(fullfile(inputFolder, "*.xlsx"));
     assert(~isempty(xl), 'No Excel file (*.xlsx) found in %s', inputFolder);
     excelPath = fullfile(xl(1).folder, xl(1).name);
 end
 assert(isfile(excelPath), 'Excel not found: %s', excelPath);
-
 outRoot = fullfile(inputFolder, "CSD Center Slices Output");
 if ~exist(outRoot,'dir'), mkdir(outRoot); end
-
 % --- MODIFIED: Added PDF paths ---
 outSOLpng = fullfile(outRoot, "CSD_CenterSlices_SOLID.png");
 outSPUpng = fullfile(outRoot, "CSD_CenterSlices_SPUTTER.png");
@@ -59,7 +76,6 @@ outSOLpdf = fullfile(outRoot, "CSD_CenterSlices_SOLID.pdf");
 outSPUpdf = fullfile(outRoot, "CSD_CenterSlices_SPUTTER.pdf");
 outCSV    = fullfile(outRoot, "CSD_CenterSlices_stats.csv");
 % --- END MODIFIED ---
-
 % ---------- Data ----------
 assert(isfile(dataMatPath), 'Data MAT not found: %s', dataMatPath);
 mf = matfile(dataMatPath);
@@ -67,7 +83,6 @@ try sfx = mf.sfx; catch, error('Missing "sfx" in data MAT.'); end
 nRowsAll = size(mf,'d',1);
 nSamp    = size(mf,'d',2);
 try kept_channels = mf.kept_channels; catch, kept_channels = []; end %#ok<NASGU>
-
 % Channels
 if isempty(channelIdx)
     chList = 1:nRowsAll;
@@ -76,6 +91,7 @@ else
     chList = chList(chList>=1 & chList<=nRowsAll);
 end
 nCh = numel(chList);
+assert(nCh > 0, 'No valid channels selected.');
 
 % Scaling
 if numel(scaleToMicroV)==1
@@ -84,21 +100,18 @@ else
     assert(numel(scaleToMicroV) >= nRowsAll, 'scaleToMicroV must be scalar or length >= nRowsAll.');
     scaleVec = scaleToMicroV(:);
 end
-
 % ---------- Windows ----------
 HWwin    = max(1, round(winHWms    * sfx));  % ±display half-width
 HWanchor = max(1, round(anchorHWms * sfx));  % ±anchor search
 tRelMs   = (-HWwin:HWwin) / sfx * 1e3; %#ok<NASGU>
 centerIdx= HWwin + 1;
-
 % Indices to average the "center slice" over [-1, 0] ms
 i0_slice = centerIdx + round(-1e-3 * sfx);  % -1 ms
 i1_slice = centerIdx;                       %  0 ms
 i0_slice = max(1, min(2*HWwin+1, i0_slice));
 i1_slice = max(1, min(2*HWwin+1, i1_slice));
-fprintf('CSD Center Slices PIPELINE: sfx=%.1f Hz | window ±%.1f ms | anchor: lastCh max (±%.1f ms)\n', ...
-    sfx, 1e3*HWwin/sfx, 1e3*HWanchor/sfx);
-
+fprintf('CSD Center Slices PIPELINE: sfx=%.1f Hz | window ±%.1f ms\n', ...
+    sfx, 1e3*HWwin/sfx);
 % ---------- Excel -> sample indices ----------
 T = readtable(excelPath, 'ReadVariableNames', true);
 canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
@@ -106,7 +119,6 @@ i_onSamp  = find(strcmp(canon,'onsamp')  | strcmp(canon,'startsample') | strcmp(
 i_offSamp = find(strcmp(canon,'offsamp') | strcmp(canon,'endsample')   | strcmp(canon,'endsamp')   | strcmp(canon,'off'), 1);
 i_onSec   = find(strcmp(canon,'onsec')   | strcmp(canon,'startsec')    | strcmp(canon,'onsecs'), 1);
 i_offSec  = find(strcmp(canon,'offsec')  | strcmp(canon,'endsec')      | strcmp(canon,'offsecs'), 1);
-
 if ~isempty(i_onSamp) && ~isempty(i_offSamp)
     onSamp  = double(T{:, i_onSamp});
     offSamp = double(T{:, i_offSamp});
@@ -121,23 +133,19 @@ end
 onSamp  = max(1, min(onSamp,  nSamp));
 offSamp = max(1, min(offSamp, nSamp));
 NrowsXL = numel(onSamp);
-
 % ---------- Events from PNG names ----------
 evtSOL = parseEvtNumsFromPngs(solidDir);
 evtSPU = parseEvtNumsFromPngs(sputterDir);
 fprintf('Found %d SOLID, %d SPUTTER events (by filenames).\n', numel(evtSOL), numel(evtSPU));
-
 if ~isempty(maxEventsPer)
     evtSOL = evtSOL(1:min(end, maxEventsPer));
     evtSPU = evtSPU(1:min(end, maxEventsPer));
 end
-
 % ---------- Build & render ----------
 % --- MODIFIED: Pass PDF paths to render function ---
 S1 = buildAndRender(evtSOL, 'SOLID',   outSOLpng, outSOLpdf);
 S2 = buildAndRender(evtSPU, 'SPUTTER', outSPUpng, outSPUpdf);
 % --- END MODIFIED ---
-
 % ---------- Stats CSV ----------
 try
     G = {};
@@ -148,20 +156,19 @@ try
         writetable(Tcsv, outCSV);
     else
         % create a stub so main can find something
-        writetable(cell2table(cell(0,7), 'VariableNames', ...
-            {'group','nEvents','clim','sliceThickness','anchorHW_ms','winHW_ms','note'}), outCSV);
+        writetable(cell2table(cell(0,10), 'VariableNames', ...
+            {'group','nEvents','clim','sliceThickness','anchorHW_ms','winHW_ms','note', ...
+             'AnchorMidpoint','AnchorChannelRow','AnchorPolarity'}), outCSV);
     end
 catch ME
     warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline: failed to write stats CSV: %s', ME.message);
 end
-
 % ---------- Return ----------
 % --- MODIFIED: Add PDF paths to output struct ---
 out = struct('pngSolid', outSOLpng, 'pngSputter', outSPUpng, ...
              'pdfSolid', outSOLpdf, 'pdfSputter', outSPUpdf, ...
              'statsCSV', outCSV);
 % --- END MODIFIED ---
-
 % ============================= HELPERS =============================
     % --- MODIFIED: Function signature ---
     function Tgroup = buildAndRender(evtList, tag, outPngPath, outPdfPath)
@@ -173,6 +180,7 @@ out = struct('pngSolid', outSOLpng, 'pngSputter', outSPUpng, ...
         
         S = nan(nCh, numel(evtList));  % per-event 0 ms CSD slice (channels x events)
         used = false(numel(evtList),1);
+        anchorDesc = ""; % For plot title
         
         for ii = 1:numel(evtList)
             e = evtList(ii);
@@ -183,17 +191,60 @@ out = struct('pngSolid', outSOLpng, 'pngSputter', outSPUpng, ...
             s1_ev = round(offSamp(rowXL));
             if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
             
-            % Anchor by first-channel positive peak (±anchor window)
+            % --- MODIFIED ANCHOR LOGIC ---
             ancMid = round((s0_ev + s1_ev)/2);
-            s0a = max(1, ancMid - HWanchor);
-            s1a = min(nSamp, ancMid + HWanchor);
-            refCh = chList(end);
             
-            y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
-            if isempty(y0) || all(~isfinite(y0)), continue; end
+            if anchorMidpoint == true
+                % Option 1: Use midpoint, skip search
+                anchor = ancMid;
+                if ii == 1, anchorDesc = "Event Midpoint"; end
+            else
+                % Option 2: Perform peak-finding search
+                
+                % Determine reference channel
+                if anchorChannel == 0
+                    refCh = chList(end); % Default: last channel
+                else
+                    % Use user-specified channel, with validation
+                    if anchorChannel < 1 || anchorChannel > nRowsAll || ~any(chList == anchorChannel)
+                        if ii == 1
+                            warning('Invalid or unselected anchorChannel %d. Reverting to last channel (%d).', anchorChannel, chList(end));
+                        end
+                        refCh = chList(end);
+                    else
+                        refCh = anchorChannel; % Use specified, valid row
+                    end
+                end
+                
+                if ii == 1 % Print anchor method on first event
+                    anchorDesc = sprintf("%s peak on row %d (±%.1f ms)", ...
+                                         anchorPolarity, refCh, 1e3*HWanchor/sfx);
+                end
+                
+                % Define search window
+                s0a = max(1, ancMid - HWanchor);
+                s1a = min(nSamp, ancMid + HWanchor);
+                
+                y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
+                if isempty(y0) || all(~isfinite(y0)), continue; end
+                
+                % Find peak based on polarity
+                switch anchorPolarity
+                    case 'pos'
+                        [~, k_rel] = max(y0);
+                    case 'neg'
+                        [~, k_rel] = min(y0);
+                    case 'abs'
+                        [~, k_rel] = max(abs(y0));
+                    otherwise
+                        [~, k_rel] = max(y0); % Default to pos
+                end
+                
+                anchor = s0a + k_rel - 1;
+            end
             
-            [~, k_rel] = max(y0);
-            anchor = s0a + k_rel - 1;
+            if ii == 1, fprintf('(%s) Align: %s\n', tag, anchorDesc); end
+            % --- END MODIFIED ANCHOR LOGIC ---
             
             % Window around anchor
             s0 = anchor - HWwin; s1 = anchor + HWwin;
@@ -219,6 +270,7 @@ out = struct('pngSolid', outSOLpng, 'pngSputter', outSPUpng, ...
             warning('CSDCenterSlices:%s', '%s: no usable events after alignment and windowing.', tag);
             return;
         end
+        if anchorDesc == "", anchorDesc = "N/A (no events)"; end
         
         S = S(:,used);              % keep only used events
         nEvt = size(S,2);
@@ -319,8 +371,10 @@ out = struct('pngSolid', outSOLpng, 'pngSputter', outSPUpng, ...
         % Titles (small font to avoid crop) + group-level sgtitle
         title(ax1, sprintf('%s — CSD slices avg [-1, 0] ms (n=%d)', tag, nEvt), 'FontSize',10, 'FontWeight','bold');
         title(ax2, sprintf('%s — Vertical waveform (mean in black)', tag), 'FontSize',10, 'FontWeight','bold');
-        sg = sprintf('%s  |  align: last-channel max (\\pm%.1f ms)  |  channels=%d', ...
-            tag, 1e3*HWanchor/sfx, nCh);
+        
+        % --- MODIFIED SGTITLE ---
+        sg = sprintf('%s  |  align: %s  |  channels=%d', ...
+            tag, anchorDesc, nCh);
         sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
         
         % --- MODIFIED: Export PNG and PDF ---
@@ -339,10 +393,12 @@ out = struct('pngSolid', outSOLpng, 'pngSputter', outSPUpng, ...
         close(f);
         % --- END MODIFIED ---
         
-        % small stats table for CSV
+        % --- MODIFIED STATS TABLE ---
         Tgroup = table(string(tag), size(S,2), clim, sliceThick, ...
                        1e3*HWanchor/sfx, 1e3*HWwin/sfx, string('OK'), ...
-            'VariableNames', {'group','nEvents','clim','sliceThickness','anchorHW_ms','winHW_ms','note'});
+                       anchorMidpoint, anchorChannel, string(anchorPolarity), ...
+            'VariableNames', {'group','nEvents','clim','sliceThickness','anchorHW_ms','winHW_ms','note', ...
+                              'AnchorMidpoint','AnchorChannelRow','AnchorPolarity'});
     end
 end
 % --------- utilities ---------

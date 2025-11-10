@@ -7,6 +7,14 @@ function out = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin)
 %   out.pngSolid, out.pngSputter
 %   out.pdfSolid, out.pdfSputter
 %   out.statsCSV
+%
+% --- NEW ANCHOR PARAMETERS ---
+%   'anchorMidpoint' (false): If true, skips peak search and uses the
+%                             event's midpoint as the anchor.
+%   'anchorChannel'  (0):     Matrix row to use for anchor search.
+%                             If 0, defaults to last channel in chList.
+%   'anchorPolarity' ('pos'): Type of peak to find: 'pos', 'neg', or 'abs'.
+% -----------------------------
 
 [paths, statsTable] = CSDRaster_Avg_core(inputFolder, dataMatPath, varargin{:});
 
@@ -53,6 +61,13 @@ p.addParameter('climCSD',     [],            @(x) isempty(x) || (isscalar(x) && 
 p.addParameter('yRobustPct',  99.5,          @(x) isfinite(x) && x>0 && x<100);
 p.addParameter('climPadFrac', 0.12,          @(x) isfinite(x) && x>=0 && x<=0.5);
 p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
+
+% --- NEW ANCHOR PARAMETERS ---
+p.addParameter('anchorMidpoint', false, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('anchorChannel', 0, @(x)isscalar(x)&&isnumeric(x)&&x>=0);
+p.addParameter('anchorPolarity', 'pos', @(s) any(validatestring(s, {'pos','neg','abs'})));
+% --- END NEW PARAMETERS ---
+
 p.parse(inputFolder, dataMatPath, varargin{:});
 inputFolder    = string(p.Results.inputFolder);
 dataMatPath    = string(p.Results.dataMatPath);
@@ -66,6 +81,12 @@ climCSDOpt     = p.Results.climCSD;
 yRobustPct     = p.Results.yRobustPct;
 climPadFrac    = p.Results.climPadFrac;
 maxEventsPer   = p.Results.maxEventsPerGroup;
+
+% --- NEW ANCHOR PARAMETERS ---
+anchorMidpoint = p.Results.anchorMidpoint;
+anchorChannel  = p.Results.anchorChannel;
+anchorPolarity = p.Results.anchorPolarity;
+% --- END NEW PARAMETERS ---
 
 % ---------------- Layout & IO ----------------
 solidDir   = fullfile(inputFolder, "Solid");
@@ -106,6 +127,7 @@ else
     chList = chList(chList>=1 & chList<=nRowsAll);
 end
 nCh = numel(chList);
+assert(nCh > 0, 'No valid channels selected.');
 
 % scaling vector
 if numel(scaleToMicroV)==1
@@ -126,12 +148,14 @@ winN     = numel(tRelMs);
 metStart = HWwin - HWmet + 1;
 metEnd   = HWwin + HWmet + 1;
 Lmet     = metEnd - metStart + 1;
-fprintf('CSD AvgGroups: sfx=%.1f Hz | window ±%.1f ms | anchor: lastCh max (±%.1f ms)\n', ...
-    sfx, 1e3*HWwin/sfx, 1e3*HWanchor/sfx);
+
+% --- MODIFIED: More general logging ---
+fprintf('CSD AvgGroups: sfx=%.1f Hz | window ±%.1f ms\n', ...
+    sfx, 1e3*HWwin/sfx);
 
 % ---------------- Read Excel -> samples per row ----------------
 T = readtable(excelPath, 'ReadVariableNames', true);
-canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
+canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z09]', ''));
 i_onSamp  = find(strcmp(canon,'onsamp')  | strcmp(canon,'startsample') | strcmp(canon,'startsamp') | strcmp(canon,'on'), 1);
 i_offSamp = find(strcmp(canon,'offsamp') | strcmp(canon,'endsample')   | strcmp(canon,'endsamp')   | strcmp(canon,'off'), 1);
 i_onSec   = find(strcmp(canon,'onsec')   | strcmp(canon,'startsec')    | strcmp(canon,'onsecs'), 1);
@@ -204,10 +228,12 @@ end
 % ---------------- Stats table for pipeline ----------------
 statsT = table();
 if ~isempty(S_csd)
-    statsT = [statsT; summarizeGroup('SOLID', S_stats, climGlobal, nCh, sfx, winHWms, anchorHWms)]; %#ok<AGROW>
+    % --- MODIFIED: Pass new anchor params ---
+    statsT = [statsT; summarizeGroup('SOLID', S_stats, climGlobal, nCh, sfx, winHWms, anchorHWms, anchorMidpoint, anchorChannel, anchorPolarity)]; %#ok<AGROW>
 end
 if ~isempty(P_csd)
-    statsT = [statsT; summarizeGroup('SPUTTER', P_stats, climGlobal, nCh, sfx, winHWms, anchorHWms)]; %#ok<AGROW>
+    % --- MODIFIED: Pass new anchor params ---
+    statsT = [statsT; summarizeGroup('SPUTTER', P_stats, climGlobal, nCh, sfx, winHWms, anchorHWms, anchorMidpoint, anchorChannel, anchorPolarity)]; %#ok<AGROW>
 end
 
 % --- MODIFIED: Added PDF paths to output struct ---
@@ -224,6 +250,8 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
         sumY  = zeros(nCh, winN);
         nUsed = 0;
         
+        anchorDesc = ""; % For logging
+        
         for ii = 1:numel(evtList)
             e = evtList(ii);
             rowXL = e;
@@ -233,17 +261,60 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
             s1_ev = round(offSamp(rowXL));
             if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
             
-            % Anchor by first-channel positive peak (±anchor window)
+            % --- MODIFIED ANCHOR LOGIC ---
             ancMid = round((s0_ev + s1_ev)/2);
-            s0a = max(1, ancMid - HWanchor);
-            s1a = min(nSamp, ancMid + HWanchor);
-            refCh = chList(end);
             
-            y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
-            if isempty(y0) || all(~isfinite(y0)), continue; end
+            if anchorMidpoint == true
+                % Option 1: Use midpoint, skip search
+                anchor = ancMid;
+                if ii == 1, anchorDesc = "Event Midpoint"; end
+            else
+                % Option 2: Perform peak-finding search
+                
+                % Determine reference channel
+                if anchorChannel == 0
+                    refCh = chList(end); % Default: last channel
+                else
+                    % Use user-specified channel, with validation
+                    if anchorChannel < 1 || anchorChannel > nRowsAll || ~any(chList == anchorChannel)
+                        if ii == 1
+                            warning('Invalid or unselected anchorChannel %d. Reverting to last channel (%d).', anchorChannel, chList(end));
+                        end
+                        refCh = chList(end);
+                    else
+                        refCh = anchorChannel; % Use specified, valid row
+                    end
+                end
+                
+                if ii == 1 % Print anchor method on first event
+                    anchorDesc = sprintf("%s peak on row %d (±%.1f ms)", ...
+                                         anchorPolarity, refCh, 1e3*anchorHWms/sfx);
+                end
+                
+                % Define search window
+                s0a = max(1, ancMid - HWanchor);
+                s1a = min(nSamp, ancMid + HWanchor);
+                
+                y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
+                if isempty(y0) || all(~isfinite(y0)), continue; end
+                
+                % Find peak based on polarity
+                switch anchorPolarity
+                    case 'pos'
+                        [~, k_rel] = max(y0);
+                    case 'neg'
+                        [~, k_rel] = min(y0);
+                    case 'abs'
+                        [~, k_rel] = max(abs(y0));
+                    otherwise
+                        [~, k_rel] = max(y0); % Default to pos
+                end
+                
+                anchor = s0a + k_rel - 1;
+            end
             
-            [~, k_rel] = max(y0);
-            anchor = s0a + k_rel - 1;
+            if ii == 1, fprintf('(%s) Align: %s\n', tag, anchorDesc); end
+            % --- END MODIFIED ANCHOR LOGIC ---
             
             % Window
             s0 = anchor - HWwin; s1 = anchor + HWwin;
@@ -391,14 +462,17 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
         C(end,:) = C(end-1,:);
     end
 
-    function Trow = summarizeGroup(tag, stats, climG, nCh_, sfx_, winHWms_, anchorHWms_)
+    % --- MODIFIED: Added new anchor parameters to stats table ---
+    function Trow = summarizeGroup(tag, stats, climG, nCh_, sfx_, winHWms_, anchorHWms_, anchorMidpoint_, anchorChannel_, anchorPolarity_)
         Trow = table( ...
             string(tag), stats.nEvents, nCh_, sfx_, ...
             1e3*winHWms_, 1e3*anchorHWms_, ...
             climG, stats.pkMean, stats.pkSD, stats.hwMean, stats.hwSD, ...
+            anchorMidpoint_, anchorChannel_, string(anchorPolarity_), ...
             'VariableNames', {'Group','Events','Channels','SampRateHz', ...
                               'DisplayHalfWidth_ms','AnchorHalfWidth_ms', ...
-                              'CLim_CSD','MeanCSDPeak','SD_CSDPeak','MeanHW_ms','SD_HW_ms'});
+                              'CLim_CSD','MeanCSDPeak','SD_CSDPeak','MeanHW_ms','SD_HW_ms', ...
+                              'AnchorMidpoint','AnchorChannelRow','AnchorPolarity'});
     end
 
 end

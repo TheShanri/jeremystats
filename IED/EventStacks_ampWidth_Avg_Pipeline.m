@@ -8,6 +8,14 @@ function res = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varar
 % OUTPUT:
 %   res.pngSolid, res.pngSputter, res.pdfSolid, res.pdfSputter,
 %   res.statsMatSolid, res.statsMatSputter, res.statsCSV
+%
+% --- NEW ANCHOR PARAMETERS ---
+%   'anchorMidpoint' (false): If true, skips peak search and uses the
+%                             event's midpoint as the anchor.
+%   'anchorChannel'  (0):     Matrix row to use for anchor search.
+%                             If 0, defaults to last channel in chList.
+%   'anchorPolarity' ('pos'): Type of peak to find: 'pos', 'neg', or 'abs'.
+% -----------------------------
 
 % ---------------- Args ----------------
 p = inputParser;
@@ -36,6 +44,12 @@ p.addParameter('yLimMicroV', [], @(x) isempty(x) || (isscalar(x) && x>0)); % fix
 p.addParameter('yRobustPct', 99.5, @(x) isfinite(x) && x>0 && x<100);      % robust percentile if auto
 p.addParameter('yPadFrac', 0.12, @(x) isfinite(x) && x>=0 && x<=0.5);      % headroom
 
+% --- NEW ANCHOR PARAMETERS ---
+p.addParameter('anchorMidpoint', false, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('anchorChannel', 0, @(x)isscalar(x)&&isnumeric(x)&&x>=0);
+p.addParameter('anchorPolarity', 'pos', @(s) any(validatestring(s, {'pos','neg','abs'})));
+% --- END NEW PARAMETERS ---
+
 p.parse(inputFolder, dataMatPath, varargin{:});
 inputFolder     = string(p.Results.inputFolder);
 dataMatPath     = string(p.Results.dataMatPath);
@@ -56,6 +70,12 @@ tagStr          = string(p.Results.tag);
 yLimMicroV      = p.Results.yLimMicroV;
 yRobustPct      = p.Results.yRobustPct;
 yPadFrac        = p.Results.yPadFrac;
+
+% --- NEW ANCHOR PARAMETERS ---
+anchorMidpoint = p.Results.anchorMidpoint;
+anchorChannel  = p.Results.anchorChannel;
+anchorPolarity = p.Results.anchorPolarity;
+% --- END NEW PARAMETERS ---
 
 % ---------------- Layout ----------------
 solidDir   = fullfile(inputFolder, "Solid");
@@ -85,6 +105,7 @@ else
     chList = chList(chList>=1 & chList<=nRowsAll);
 end
 nCh = numel(chList);
+assert(nCh > 0, 'No valid channels selected.');
 
 % ---------- Pipeline output directory ----------
 if saveDir == ""
@@ -113,8 +134,8 @@ winN      = numel(tRelSamp);
 centerIdx = HWdisp + 1;
 
 fprintf(['EventStacks_ampWidth_Avg_Pipeline: sfx=%.1f Hz | display ±%.1f ms | ' ...
-         'metrics ±%.1f ms | anchorSearch ±%.1f ms | channels=%d\n'], ...
-         sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, 1e3*HWanchor/sfx, nCh);
+         'metrics ±%.1f ms | channels=%d\n'], ...
+         sfx, 1e3*HWdisp/sfx, 1e3*HWmet/sfx, nCh);
 
 % ---------------- Spreadsheet -> samples ----------------
 T = readtable(excelPath, 'ReadVariableNames', true);
@@ -161,8 +182,9 @@ if ~isempty(maxEventsPerGrp)
 end
 
 % ---------------- Build group stats ----------------
-[SOL, robSOL] = avgForGroup(evtSOL, 'SOLID');
-[SPU, robSPU] = avgForGroup(evtSPU, 'SPUTTER');
+% --- MODIFIED: Pass new anchor params ---
+[SOL, robSOL] = avgForGroup(evtSOL, 'SOLID', anchorMidpoint, anchorChannel, anchorPolarity);
+[SPU, robSPU] = avgForGroup(evtSPU, 'SPUTTER', anchorMidpoint, anchorChannel, anchorPolarity);
 
 % ---------------- Global y-limit across BOTH figures ----------------
 if isempty(yLimMicroV)
@@ -186,8 +208,9 @@ if ~isempty(SOL), save(matSOL, '-struct', 'SOL'); end
 if ~isempty(SPU), save(matSPU, '-struct', 'SPU'); end
 
 try
-    Tcsv = makePerChannelTable(SOL, 'SOLID', chList, kept_channels);
-    Tcsv = [Tcsv; makePerChannelTable(SPU, 'SPUTTER', chList, kept_channels)];
+    % --- MODIFIED: Pass new anchor params ---
+    Tcsv = makePerChannelTable(SOL, 'SOLID', chList, kept_channels, anchorMidpoint, anchorChannel, anchorPolarity);
+    Tcsv = [Tcsv; makePerChannelTable(SPU, 'SPUTTER', chList, kept_channels, anchorMidpoint, anchorChannel, anchorPolarity)];
     writetable(Tcsv, csvAll);
 catch ME
     warning('Failed writing EventStacks per-channel stats CSV: %s', ME.message);
@@ -230,7 +253,8 @@ function yMax = computeYMaxForGroup(G)
     if ~isfinite(yMax) || yMax <= 0, yMax = 0; end
 end
 
-function [G, robAll] = avgForGroup(evtList, tag)
+% --- MODIFIED: Added new anchor params to signature ---
+function [G, robAll] = avgForGroup(evtList, tag, anchorMidpoint, anchorChannel, anchorPolarity)
 % Per-channel aggregates:
 %   MU (nCh×winN), SE (nCh×winN), nUsed (nCh×1), ampMean/SD (nCh×1), hwMean/SD (nCh×1)
 % Also returns robAll = robust |signal| percentile for y-limit suggestion.
@@ -248,10 +272,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
     hws    = cell(nCh,1);   % per-event half-widths (ms)
     for i=1:nCh, stacks{i} = []; amps{i} = []; hws{i} = []; end
 
-    % Use the LAST channel in chList to drive the anchor search
-    refCh = chList(end);  
-    fprintf('[ANCHOR] Using LAST channel (row %d) as reference for anchoring.\n', refCh);
-
+    anchorDesc = ""; % For logging
     nBad = 0;
 
     for ii = 1:numel(evtList)
@@ -270,21 +291,66 @@ function [G, robAll] = avgForGroup(evtList, tag)
 
         ancMid = round((s0_ev + s1_ev)/2);  % event midpoint
 
-        % -------- COMMON ANCHOR from FIRST channel, POSITIVE PEAK ONLY --------
-        s0srch = max(1, ancMid - HWanchor);
-        s1srch = min(nSamp, ancMid + HWanchor);
-        yseg0  = double(mf.d(refCh, s0srch:s1srch)) * scaleToMicroV;
+        % --- MODIFIED ANCHOR LOGIC ---
+        if anchorMidpoint == true
+            % Option 1: Use midpoint, skip search
+            commonAnchor = ancMid;
+            if ii == 1, anchorDesc = "Event Midpoint"; end
+        else
+            % Option 2: Perform peak-finding search
+            
+            % Determine reference channel
+            if anchorChannel == 0
+                refCh = chList(end); % Default: last channel
+            else
+                % Use user-specified channel, with validation
+                if anchorChannel < 1 || anchorChannel > nRowsAll || ~any(chList == anchorChannel)
+                    if ii == 1
+                        warning('Invalid or unselected anchorChannel %d. Reverting to last channel (%d).', anchorChannel, chList(end));
+                    end
+                    refCh = chList(end);
+                else
+                    refCh = anchorChannel; % Use specified, valid row
+                end
+            end
+            
+            if ii == 1 % Print anchor method on first event
+                anchorDesc = sprintf("%s peak on row %d (±%.1f ms)", ...
+                                     anchorPolarity, refCh, 1e3*HWanchor/sfx);
+            end
+            
+            % Define search window
+            s0srch = max(1, ancMid - HWanchor);
+            s1srch = min(nSamp, ancMid + HWanchor);
+            
+            % --- MODIFIED: Use scaleVec for anchor channel ---
+            scRef = scaleToMicroV; if numel(scRef)>1, scRef = scRef(refCh); end
+            yseg0  = double(mf.d(refCh, s0srch:s1srch)) * scRef;
 
-        if isempty(yseg0) || all(~isfinite(yseg0))
-            % Skip this event (do not error out the pipeline)
-            nBad = nBad + 1; continue;
+            if isempty(yseg0) || all(~isfinite(yseg0))
+                nBad = nBad + 1; continue;
+            end
+            
+            % Find peak based on polarity
+            switch anchorPolarity
+                case 'pos'
+                    [~, k_rel] = max(yseg0);
+                case 'neg'
+                    [~, k_rel] = min(yseg0);
+                case 'abs'
+                    [~, k_rel] = max(abs(yseg0));
+                otherwise
+                    [~, k_rel] = max(yseg0); % Default to pos
+            end
+            
+            if isempty(k_rel) || ~isfinite(k_rel)
+                nBad = nBad + 1; continue;
+            end
+            commonAnchor = s0srch + k_rel - 1;
         end
-
-        [~, k_rel] = max(yseg0);  % positive peak (no abs, no mins)
-        if isempty(k_rel) || ~isfinite(k_rel)
-            nBad = nBad + 1; continue;
-        end
-        commonAnchor = s0srch + k_rel - 1;
+        
+        if ii == 1, fprintf('(%s) Align: %s\n', tag, anchorDesc); end
+        % --- END MODIFIED ANCHOR LOGIC ---
 
         okAnyCh = false;
         for k = 1:nCh
@@ -295,7 +361,13 @@ function [G, robAll] = avgForGroup(evtList, tag)
             s0 = commonAnchor - HWdisp; s1 = commonAnchor + HWdisp;
             if s0 < 1 || s1 > nSamp, continue; end
             y = double(mf.d(ch, s0:s1)) * sc;
-            if any(~isfinite(y)), continue; end
+            if any(~isfinite(y)), continue; end % Note: was any(~isfinite(y))
+            
+            % Check if all are NaN (e.g., from OOB)
+            if all(isnan(y))
+                continue;
+            end
+            
             stacks{k}(end+1,:) = y; %#ok<AGROW>
             okAnyCh = true;
 
@@ -352,6 +424,7 @@ function [G, robAll] = avgForGroup(evtList, tag)
 
     if nBad>0, fprintf('%s: skipped %d event(s) (bad/missing/out-of-bounds).\n', tag, nBad); end
     fprintf('%s: used %d/%d events (any channel contributed).\n', tag, numel(G.usedEvents), numel(evtList));
+    if anchorDesc == "", anchorDesc = "N/A (no events)"; end
 
     % Aggregate per channel
     for k = 1:nCh
@@ -370,13 +443,14 @@ function [G, robAll] = avgForGroup(evtList, tag)
         G.traces{k} = X;
     end
 
-    % Save lightweight stats for this group
-    alignLabel = sprintf('last-channel max (±%.1f ms)', 1e3*HWanchor/sfx);
+    % --- MODIFIED: Save new anchor params to .mat file ---
+    alignLabel = string(anchorDesc); % Use dynamic label
     statsPath = fullfile(outDir, sprintf('AvgStack_%s_stats.mat', tag));
     chList_local = chList; scale_local = scaleToMicroV; %#ok<NASGU>
     Gsave = G;
     save(statsPath, 'tRelMs','chList_local','kept_channels','scale_local','halfWidthMs','metricHWms','sfx', ...
-                    'alignLabel','Gsave');
+                    'alignLabel','Gsave', ...
+                    'anchorMidpoint', 'anchorChannel', 'anchorPolarity');
     fprintf('Saved group stats: %s\n', statsPath);
 
     % attach for caller
@@ -398,17 +472,10 @@ function plotStackWithIndicators(G, tag, yL, outPng, outPdf)
     f = figure('Color','w','Position',[60 60 1100 figH],'Visible','off');
     
     % --- START: Full Manual PDF Layout Control ---
-    % Set the figure's units to inches
     set(f, 'Units', 'inches');
-    
-    % Get the figure's position [left, bottom, width, height] in inches
     figPos_inches = get(f, 'Position');
-    
-    % Set the PDF 'page' (PaperSize) to be the *exact* size of the figure
     set(f, 'PaperUnits', 'inches');
     set(f, 'PaperSize', [figPos_inches(3) figPos_inches(4)]);
-    
-    % Set the figure's position on the 'page' to fill it completely
     set(f, 'PaperPosition', [0 0 figPos_inches(3) figPos_inches(4)]);
     % --- END: Full Manual PDF Layout Control ---
 
@@ -441,45 +508,6 @@ function plotStackWithIndicators(G, tag, yL, outPng, outPdf)
             yp = [yu,      fliplr(yl)];
             patch('XData',xp,'YData',yp,'FaceColor',[0.3 0.3 0.9],'FaceAlpha',0.25,'EdgeColor','none','HandleVisibility','off');
             plot(ax, tRelMs, mu, 'LineWidth', 1.8);
-
-            % % ---- Indicators computed on MEAN waveform within ±metric window (POSITIVE PEAK ONLY) ----
-            % muMet = mu(metStart:metEnd);
-            % if numel(muMet) >= 3 && all(isfinite(muMet))
-            %     [amp, pkRel] = max(muMet);   % positive peak amplitude
-            %     h  = 0.5 * amp;              % half-height
-            % 
-            %     % crossings (linear interp) on muMet
-            %     kL = pkRel;
-            %     while kL > 1 && muMet(kL) >= h, kL = kL - 1; end
-            %     if kL >= 1 && (kL+1) <= Lmet && muMet(kL) < h && muMet(kL+1) >= h
-            %         left_ip = kL + (h - muMet(kL)) / (muMet(kL+1) - muMet(kL));
-            %     else, left_ip = NaN; end
-            % 
-            %     kR = pkRel;
-            %     while kR < Lmet && muMet(kR) >= h, kR = kR + 1; end
-            %     if (kR-1) >= 1 && kR <= Lmet && muMet(kR-1) >= h && muMet(kR) < h
-            %         right_ip = (kR-1) + (h - muMet(kR-1)) / (muMet(kR) - muMet(kR-1));
-            %     else, right_ip = NaN; end
-            % 
-            %     if isfinite(left_ip) && isfinite(right_ip)
-            %         % convert to time (ms) RELATIVE to center
-            %         tPk_ms = ((metStart + pkRel  - 1) - centerIdx) / sfx * 1e3;
-            %         tL_ms  = ((metStart + left_ip - 1) - centerIdx) / sfx * 1e3;
-            %         tR_ms  = ((metStart + right_ip- 1) - centerIdx) / sfx * 1e3;
-            % 
-            %         % Draw
-            %         if tL_ms >= tRelMs(1) && tR_ms <= tRelMs(end)
-            %             xline(ax, tL_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
-            %             xline(ax, tR_ms, '-', 'Color',[0.85 0.10 0.10], 'LineWidth',2.2, 'HandleVisibility','off');
-            %             plot(ax, [tL_ms tR_ms],[0 0], '-', 'Color',[0.85 0.10 0.10], 'LineWidth',1.4, 'HandleVisibility','off');
-            %         end
-            % 
-            %         if tPk_ms >= tRelMs(1) && tPk_ms <= tRelMs(end)
-            %             plot(ax, tPk_ms, amp, 'o', 'MarkerSize', 4.5, ...
-            %                  'MarkerFaceColor',[0 0 0], 'MarkerEdgeColor','none', 'HandleVisibility','off');
-            %         end
-            %     end
-            % end
         end
 
         xline(ax, 0,'--k','LineWidth',0.9); yline(ax, 0,':','Color',[0.7 0.7 0.7]);
@@ -499,7 +527,21 @@ function plotStackWithIndicators(G, tag, yL, outPng, outPdf)
         ylabel(ax, '\muV');
     end
 
-    sgtitle(tl, sprintf('%s', tag), 'FontSize', 11, 'FontWeight', 'bold');
+    % --- MODIFIED: Use G.alignLabel if it exists, otherwise just tag ---
+    if isfield(G, 'outStatsPath') && ~isempty(G.outStatsPath)
+        try
+            S = load(G.outStatsPath, 'alignLabel');
+            if isfield(S, 'alignLabel')
+                sgtitle(tl, sprintf('%s  |  Align: %s', tag, S.alignLabel), 'FontSize', 11, 'FontWeight', 'bold');
+            else
+                sgtitle(tl, sprintf('%s', tag), 'FontSize', 11, 'FontWeight', 'bold');
+            end
+        catch
+             sgtitle(tl, sprintf('%s', tag), 'FontSize', 11, 'FontWeight', 'bold');
+        end
+    else
+         sgtitle(tl, sprintf('%s', tag), 'FontSize', 11, 'FontWeight', 'bold');
+    end
 
     exportgraphics(f, outPng, 'Resolution', 220);
     fprintf('Saved: %s\n', outPng);
@@ -519,7 +561,8 @@ function s = tern(cond, a, b)
     if cond, s = a; else, s = b; end
 end
 
-function T = makePerChannelTable(G, groupName, chList, kept_channels)
+% --- MODIFIED: Added new anchor params to signature and table ---
+function T = makePerChannelTable(G, groupName, chList, kept_channels, anchorMidpoint, anchorChannel, anchorPolarity)
 if isempty(G) || all(all(isnan(G.MU)))
     T = table();
     return;
@@ -531,13 +574,20 @@ else
     chLab = arrayfun(@(r) sprintf('row %d (CSC%d)', r, kept_channels(r)), chList(:), 'UniformOutput', false);
 end
 
+% Create new columns with repeated values
+anchorMidpointCol = repmat(anchorMidpoint, nCh, 1);
+anchorChannelCol  = repmat(anchorChannel, nCh, 1);
+anchorPolarityCol = repmat(string(anchorPolarity), nCh, 1);
+
 T = table( repmat(string(groupName), nCh,1), ...
            chList(:), ...
            string(chLab(:)), ...
            G.n(:), ...
            G.ampMean(:), G.ampSD(:), ...
            G.hwMean(:),  G.hwSD(:), ...
-           'VariableNames', {'Group','Row','ChannelLabel','Nused','AmpMean_uV','AmpSD_uV','HW_ms_Mean','HW_ms_SD'});
+           anchorMidpointCol, anchorChannelCol, anchorPolarityCol, ...
+           'VariableNames', {'Group','Row','ChannelLabel','Nused','AmpMean_uV','AmpSD_uV','HW_ms_Mean','HW_ms_SD', ...
+                             'AnchorMidpoint','AnchorChannelRow','AnchorPolarity'});
 end
 
 end
