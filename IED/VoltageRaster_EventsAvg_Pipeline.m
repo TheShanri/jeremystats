@@ -7,6 +7,14 @@ function out = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, vararg
 %   out.pngSolid, out.pngSputter
 %   out.pdfSolid, out.pdfSputter
 %   out.statsCSV
+%
+% --- NEW ANCHOR PARAMETERS ---
+%   'anchorMidpoint' (false): If true, skips peak search and uses the
+%                             event's midpoint as the anchor.
+%   'anchorChannel'  (0):     Matrix row to use for anchor search.
+%                             If 0, defaults to last channel in chList.
+%   'anchorPolarity' ('pos'): Type of peak to find: 'pos', 'neg', or 'abs'.
+% -----------------------------
 
 % ---------- Run the “core” and collect outputs ----------
 [paths, statsTable] = VoltageRaster_AvgGroups_core(inputFolder, dataMatPath, varargin{:});
@@ -50,6 +58,13 @@ p.addParameter('climMicroV', [],            @(x) isempty(x) || (isscalar(x) && x
 p.addParameter('yRobustPct', 99.5,          @(x) isfinite(x) && x>0 && x<100);
 p.addParameter('climPadFrac', 0.12,         @(x) isfinite(x) && x>=0 && x<=0.5);
 p.addParameter('maxEventsPerGroup', [], @(x) isempty(x) || (isscalar(x) && x>0));
+
+% --- NEW ANCHOR PARAMETERS ---
+p.addParameter('anchorMidpoint', false, @(x)islogical(x)||ismember(x,[0 1]));
+p.addParameter('anchorChannel', 0, @(x)isscalar(x)&&isnumeric(x)&&x>=0);
+p.addParameter('anchorPolarity', 'pos', @(s) any(validatestring(s, {'pos','neg','abs'})));
+% --- END NEW PARAMETERS ---
+
 p.parse(inputFolder, dataMatPath, varargin{:});
 inputFolder    = string(p.Results.inputFolder);
 dataMatPath    = string(p.Results.dataMatPath);
@@ -63,6 +78,12 @@ climMicroVOpt  = p.Results.climMicroV;
 yRobustPct     = p.Results.yRobustPct;
 climPadFrac    = p.Results.climPadFrac;
 maxEventsPer   = p.Results.maxEventsPerGroup;
+
+% --- NEW ANCHOR PARAMETERS ---
+anchorMidpoint = p.Results.anchorMidpoint;
+anchorChannel  = p.Results.anchorChannel;
+anchorPolarity = p.Results.anchorPolarity;
+% --- END NEW PARAMETERS ---
 
 % ---------------- Layout & IO ----------------
 solidDir   = fullfile(inputFolder, "Solid");
@@ -100,6 +121,7 @@ else
     chList = chList(chList>=1 & chList<=nRowsAll);
 end
 nCh = numel(chList);
+assert(nCh > 0, 'No valid channels selected.');
 
 % scaling vector
 if numel(scaleToMicroV)==1
@@ -120,8 +142,7 @@ winN     = numel(tRelMs);
 metStart = HWwin - HWmet + 1;
 metEnd   = HWwin + HWmet + 1;
 Lmet     = metEnd - metStart + 1;
-fprintf('VoltageRaster_AvgGroups: sfx=%.1f Hz | window ±%.1f ms | anchor: lastCh max (±%.1f ms)\n', ...
-    sfx, 1e3*HWwin/sfx, 1e3*HWanchor/sfx);
+fprintf('VoltageRaster_AvgGroups: sfx=%.1f Hz | window ±%.1f ms\n', sfx, 1e3*HWwin/sfx);
 
 % ---------------- Read Excel -> samples per row ----------------
 T = readtable(excelPath, 'ReadVariableNames', true);
@@ -194,10 +215,10 @@ end
 % ---------------- Build stats table for pipeline ----------------
 statsT = table();
 if ~isempty(S_mu)
-    statsT = [statsT; summarizeGroup('SOLID', S_stats, climGlobal, nCh, sfx, winHWms, anchorHWms)]; %#ok<AGROW>
+    statsT = [statsT; summarizeGroup('SOLID', S_stats, climGlobal, nCh, sfx, winHWms, anchorHWms, anchorMidpoint, anchorChannel, anchorPolarity)]; %#ok<AGROW>
 end
 if ~isempty(P_mu)
-    statsT = [statsT; summarizeGroup('SPUTTER', P_stats, climGlobal, nCh, sfx, winHWms, anchorHWms)]; %#ok<AGROW>
+    statsT = [statsT; summarizeGroup('SPUTTER', P_stats, climGlobal, nCh, sfx, winHWms, anchorHWms, anchorMidpoint, anchorChannel, anchorPolarity)]; %#ok<AGROW>
 end
 
 paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sputterPdf', pdfSPU);
@@ -212,6 +233,9 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
         perCh_amp = nan(nCh,1);
         perCh_hw  = nan(nCh,1);
         
+        % --- Anchor setup message (print once) ---
+        anchorDesc = ""; % Will be set on first event
+        
         for ii = 1:numel(evtList)
             e = evtList(ii);
             rowXL = e;
@@ -221,17 +245,60 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
             s1_ev = round(offSamp(rowXL));
             if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
             
-            % Anchor by first-channel positive peak (±anchor window)
+            % --- MODIFIED ANCHOR LOGIC ---
             ancMid = round((s0_ev + s1_ev)/2);
-            s0a = max(1, ancMid - HWanchor);
-            s1a = min(nSamp, ancMid + HWanchor);
-            refCh = chList(end);
             
-            y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
-            if isempty(y0) || all(~isfinite(y0)), continue; end
-            
-            [~, k_rel] = max(y0);
-            anchor = s0a + k_rel - 1;
+            if anchorMidpoint == true
+                % Option 1: Use midpoint, skip search
+                anchor = ancMid;
+                if ii == 1, anchorDesc = sprintf('Anchor: Event Midpoint (search disabled)'); end
+            else
+                % Option 2: Perform peak-finding search
+                
+                % Determine reference channel
+                if anchorChannel == 0
+                    refCh = chList(end); % Default: last channel
+                else
+                    % Use user-specified channel, with validation
+                    if anchorChannel < 1 || anchorChannel > nRowsAll || ~any(chList == anchorChannel)
+                        if ii == 1
+                            warning('Invalid or unselected anchorChannel %d. Reverting to last channel (%d).', anchorChannel, chList(end));
+                        end
+                        refCh = chList(end);
+                    else
+                        refCh = anchorChannel; % Use specified, valid row
+                    end
+                end
+                
+                if ii == 1 % Print anchor method on first event
+                    anchorDesc = sprintf('Anchor: %s peak on row %d (±%.1f ms search)', ...
+                                         anchorPolarity, refCh, 1e3*anchorHWms);
+                end
+                
+                % Define search window
+                s0a = max(1, ancMid - HWanchor);
+                s1a = min(nSamp, ancMid + HWanchor);
+                
+                y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
+                if isempty(y0) || all(~isfinite(y0)), continue; end
+                
+                % Find peak based on polarity
+                switch anchorPolarity
+                    case 'pos'
+                        [~, k_rel] = max(y0);
+                    case 'neg'
+                        [~, k_rel] = min(y0);
+                    case 'abs'
+                        [~, k_rel] = max(abs(y0));
+                    otherwise
+                        [~, k_rel] = max(y0); % Default to pos
+                end
+                
+                anchor = s0a + k_rel - 1;
+            end
+            % --- END MODIFIED ANCHOR LOGIC ---
+
+            if ii == 1, fprintf('(%s) %s\n', tag, anchorDesc); end
             
             % Window
             s0 = anchor - HWwin; s1 = anchor + HWwin;
@@ -311,17 +378,10 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
         f = figure('Color','w','Position',[90 90 1100 figH],'Visible','off');
         
         % --- START: Full Manual PDF Layout Control ---
-        % Set the figure's units to inches
         set(f, 'Units', 'inches');
-        
-        % Get the figure's position [left, bottom, width, height] in inches
         figPos_inches = get(f, 'Position');
-        
-        % Set the PDF 'page' (PaperSize) to be the *exact* size of the figure
         set(f, 'PaperUnits', 'inches');
         set(f, 'PaperSize', [figPos_inches(3) figPos_inches(4)]);
-        
-        % Set the figure's position on the 'page' to fill it completely
         set(f, 'PaperPosition', [0 0 figPos_inches(3) figPos_inches(4)]);
         % --- END: Full Manual PDF Layout Control ---
 
@@ -346,7 +406,6 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
         
         % Save PDF
         try
-            % 'print' will NOW obey the manual PaperSize and PaperPosition
             print(f, outPdfPath, '-dpdf', '-painters');
             fprintf('Saved %s average raster (PDF): %s\n', tag, outPdfPath);
         catch ME
@@ -370,13 +429,16 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
         evts = sort(unique(evts));
     end
 
-    function Trow = summarizeGroup(tag, stats, climG, nCh_, sfx_, winHWms_, anchorHWms_)
+    % --- MODIFIED: Added new anchor parameters to stats table ---
+    function Trow = summarizeGroup(tag, stats, climG, nCh_, sfx_, winHWms_, anchorHWms_, anchorMidpoint_, anchorChannel_, anchorPolarity_)
         Trow = table( ...
             string(tag), stats.nEvents, nCh_, sfx_, ...
             1e3*winHWms_, 1e3*anchorHWms_, ...
             climG, stats.ampMean, stats.ampSD, stats.hwMean, stats.hwSD, ...
+            anchorMidpoint_, anchorChannel_, string(anchorPolarity_), ...
             'VariableNames', {'Group','Events','Channels','SampRateHz', ...
                               'DisplayHalfWidth_ms','AnchorHalfWidth_ms', ...
-                              'CLim_uV','MeanPeak_uV','SD_Peak_uV','MeanHW_ms','SD_HW_ms'});
+                              'CLim_uV','MeanPeak_uV','SD_Peak_uV','MeanHW_ms','SD_HW_ms', ...
+                              'AnchorMidpoint','AnchorChannelRow','AnchorPolarity'});
     end
 end
