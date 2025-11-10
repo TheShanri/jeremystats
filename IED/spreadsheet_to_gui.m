@@ -1,10 +1,24 @@
 function spreadsheet_to_gui(excelPath, dataMatPath, varargin)
+Building GUI... Error using tiledlayout
+TiledChartLayout cannot be a child of UIAxes.
+
+Error in spreadsheet_to_gui>updatePlot (line 230)
+        tl = tiledlayout(ud.ax, ud.nCh, 1, 'Padding', 'compact', 'TileSpacing', 'compact');
+
+Error in spreadsheet_to_gui (line 188)
+updatePlot(fig);
+
+Error in main (line 32)
+spreadsheet_to_gui("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)\ets_converted_events.xlsx","C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)\LL_input_2023-09-20_12-55-14_mex_disk_uV.mat")
+ 
+
+
 % spreadsheet_to_gui (v2)
 % Creates a robust, lightweight GUI to manually click and save anchor points
 % for events defined in a spreadsheet.
 %
 % - Uses matfile for fast, on-demand data loading.
-- Robustly handles events near the start/end of the file (NaN padding).
+%- Robustly handles events near the start/end of the file (NaN padding).
 % - Includes GUI controls to change X-Window (ms) and Y-Limit (µV).
 %
 % USAGE:
