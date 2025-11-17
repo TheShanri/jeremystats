@@ -1,13 +1,15 @@
-function out = Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline(inputFolder, dataMatPath, varargin)
-% Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline
+function out = Scalogram_Waveform_Stacked_ThirdEvent_Pipeline(inputFolder, dataMatPath, varargin)
+% Scalogram_Waveform_Stacked_ThirdEvent_Pipeline
+% --- CWT (WAVELET) VERSION ---
 % - Uses the 3rd event from SOLID and SPUTTER (if present)
 % --- MODIFIED: If 3rd event not present, defaults to 1st event ---
 % - Picks 4 evenly spaced channels (prefers even rows), or from 'channelIndices' if provided
 % - Aligns on last-selected channel positive peak within ±anchorHalfWidthMs of midpoint
 % - Window: ±100 ms around anchor
-% - For each selected channel: waveform (global µV y-limit) ABOVE its spectrogram (0..1000 Hz)
-% - Spectrogram x-axis is exactly [-100, +100] ms with ticks at [-100 0 100]
-% - Every spectrogram shows "Hz" on the y-axis
+% - For each selected channel: waveform (global µV y-limit) ABOVE its scalogram
+% - Scalogram is CWT (Morlet), plotted on log-frequency axis
+% - Scalogram x-axis is exactly [-100, +100] ms with ticks at [-100 0 100]
+% - Every scalogram shows "Hz" on the y-axis
 %
 % OUTPUT: PNG(s)/PDF(s) under "<inputFolder>/Spectrogram Waveform Stacked Output/{Solid,Sputter}"
 %
@@ -40,18 +42,18 @@ p.addParameter('anchorChannel', 0, @(x)isscalar(x)&&isnumeric(x)&&x>=0);
 p.addParameter('anchorPolarity', 'pos', @(s) any(validatestring(s, {'pos','neg','abs'})));
 % --- END NEW PARAMETERS ---
 
-% Spectrogram params (UPDATED defaults)
-p.addParameter('specWinMs',   10e-3, @(x)isfinite(x)&&x>0);   % 10 ms
-p.addParameter('specOverlap', 0.50,  @(x)isfinite(x)&&x>=0&&x<1);
-p.addParameter('nfft',        [],    @(x) isempty(x) || (isscalar(x)&&x>0));
-p.addParameter('fMaxHz',      1000,  @(x)isfinite(x)&&x>0);   % 0..1000 Hz shown
+% --- CWT PARAMETERS (Spectrogram params removed) ---
+p.addParameter('fMinHz',      10,   @(x)isfinite(x)&&x>0);   % 10..1000 Hz shown
+p.addParameter('fMaxHz',      1000, @(x)isfinite(x)&&x>0);   % 10..1000 Hz shown
+% --- END CWT PARAMETERS ---
+
 % Global waveform y-scale
 p.addParameter('yLimMicroV', [],   @(x) isempty(x) || (isscalar(x) && x>0));
 p.addParameter('yRobustPct', 99.5, @(x) isfinite(x) && x>0 && x<100);
 p.addParameter('yPadFrac',   0.12, @(x) isfinite(x) && x>=0 && x<=0.5);
-% Spectrogram color scaling (dB)
-p.addParameter('powerUpperPct', 99.5, @(x)isfinite(x)&&x>0&&x<100);
-p.addParameter('powerDynRange', 40,   @(x)isfinite(x)&&x>0);
+% Scalogram color scaling (log10(magnitude))
+p.addParameter('climUpperPct',  99.5, @(x)isfinite(x)&&x>0&&x<100);
+p.addParameter('climDynRange',  4,    @(x)isfinite(x)&&x>0); % 4 orders of magnitude (log10 scale)
 % Export controls
 p.addParameter('maxFigHeightPx', 16000, @(x)isfinite(x)&&x>1000);
 p.addParameter('dpi',            220,   @(x)isfinite(x)&&x>=72);
@@ -70,15 +72,16 @@ anchorChannel  = p.Results.anchorChannel;
 anchorPolarity = p.Results.anchorPolarity;
 % --- END NEW PARAMETERS ---
 
-specWinMs       = p.Results.specWinMs;
-specOverlap     = p.Results.specOverlap;
-nfftOpt         = p.Results.nfft;
+% --- CWT PARAMETERS ---
+fMinHz          = p.Results.fMinHz;
 fMaxHz          = p.Results.fMaxHz;
+% --- END CWT PARAMETERS ---
+
 yLimMicroV      = p.Results.yLimMicroV;
 yRobustPct      = p.Results.yRobustPct;
 yPadFrac        = p.Results.yPadFrac;
-powerUpperPct   = p.Results.powerUpperPct;
-powerDynRange   = p.Results.powerDynRange;
+climUpperPct    = p.Results.climUpperPct;
+climDynRange    = p.Results.climDynRange;
 maxFigH         = p.Results.maxFigHeightPx;
 dpi             = p.Results.dpi;
 
@@ -97,6 +100,7 @@ if excelPath == ""
     excelPath = fullfile(xl(1).folder, xl(1).name);
 end
 assert(isfile(excelPath), 'Excel not found: %s', excelPath);
+% --- Output directory name is unchanged for compatibility ---
 outRoot = fullfile(inputFolder, "Spectrogram Waveform Stacked Output");
 outSOL  = fullfile(outRoot, "Solid");
 outSPU  = fullfile(outRoot, "Sputter");
@@ -163,7 +167,7 @@ else
     error('No valid channels to select from.');
 end
 nCh = numel(chSel);
-fprintf('Selected %d channels for Spectrogram: %s\n', nCh, mat2str(chSel));
+fprintf('Selected %d channels for Scalogram: %s\n', nCh, mat2str(chSel));
 
 % ---------- Render 3rd event (or 1st) of each group ----------
 % --- MODIFIED: Default to 1st event if 3rd is not available ---
@@ -177,7 +181,7 @@ elseif numel(evtSOL) >= 1
     [out.pngSolid, out.pdfSolid] = renderOne(evtSOL(1), 'SOLID', outSOL, chSel);
 else
     % Has 0
-    warning('SOLID: No events found — skipping spectrogram.');
+    warning('SOLID: No events found — skipping scalogram.');
 end
 
 if numel(evtSPU) >= 3
@@ -190,11 +194,11 @@ elseif numel(evtSPU) >= 1
     [out.pngSputter, out.pdfSputter] = renderOne(evtSPU(1), 'SPUTTER', outSPU, chSel);
 else
     % Has 0
-    warning('SPUTTER: No events found — skipping spectrogram.');
+    warning('SPUTTER: No events found — skipping scalogram.');
 end
 % --- END MODIFIED ---
 
-fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
+fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
 
 % ======================================================================
 %                              NESTED: RENDER
@@ -296,17 +300,12 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         end
         yL_global = [-yMax, +yMax];
         
-        % --- Spectrogram params ---
-        specWinSamp     = max(8, round(specWinMs * sfx));
-        specOverlapSamp = max(0, min(specWinSamp-1, round(specOverlap * specWinSamp)));
-        if isempty(nfftOpt)
-            nfft = max(32, 2^nextpow2(specWinSamp));
-        else
-            nfft = nfftOpt;
-        end
+        % --- CWT params ---
         fMax = min(fMaxHz, sfx/2);
+        fMin = max(fMinHz, 0.1); % Ensure positive fMin
+        if fMin >= fMax, fMin = fMax/100; end
         
-        % --- Precompute CLim across selected channels ---
+        % --- Precompute CWT & CLim across selected channels ---
         allP = [];
         Pane = cell(nCh,1);
         for ci = 1:nCh
@@ -314,21 +313,26 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
             sc = scaleVec(ch);
             y  = double(mf.d(ch, s0:s1)) * sc;
             y(~isfinite(y)) = 0;
-            [S,F,T] = spectrogram(y, specWinSamp, specOverlapSamp, nfft, sfx);
-            P = 10*log10(abs(S).^2 + eps);
-            msk = (F>=0) & (F<=fMax);
-            F2 = F(msk); P2 = P(msk,:);
-            % Center time axis at 0 ms AND force to [-100, +100] exactly
-            Tms = (T - (HW / sfx)) * 1e3;
-            Pane{ci} = struct('y',y, 'Tms',Tms, 'F',F2, 'P',P2);
-            allP = [allP; P2(:)]; %#ok<AGROW>
+            
+            % --- CWT CALCULATION ---
+            % Compute CWT only within the frequency limits
+            [C, F] = cwt(y, sfx, 'FrequencyLimits', [fMin fMax]);
+            % Get log-magnitude (plot log10(abs(C)))
+            P = log10(abs(C) + eps);
+            % --- END CWT CALCULATION ---
+            
+            % Time vector is just the relative window time
+            Tms = tRelMs; 
+            
+            Pane{ci} = struct('y',y, 'Tms',Tms, 'F',F, 'P',P);
+            allP = [allP; P(:)]; %#ok<AGROW>
         end
         allP = allP(isfinite(allP));
-        if isempty(allP), pHi = 0; else, pHi = prctile(allP, powerUpperPct); end
-        pLo = pHi - powerDynRange;
+        if isempty(allP), pHi = 0; else, pHi = prctile(allP, climUpperPct); end
+        pLo = pHi - climDynRange;
         
         % ---------- Figure ----------
-        rowsPerChan = 2;                 % waveform + spectrogram
+        rowsPerChan = 2;                 % waveform + scalogram
         rowsTotal   = rowsPerChan * nCh;
         perRowPx   = 130;
         figW       = 1000;
@@ -336,7 +340,8 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         figH_full  = topBotPad + perRowPx*rowsTotal;
         figH       = min(figH_full, maxFigH);
         if ~exist(outDir,'dir'), mkdir(outDir); end
-        baseName = sprintf('Evt%03d_SpecWave_Stacked', e);
+        % --- Base name unchanged for compatibility ---
+        baseName = sprintf('Evt%03d_SpecWave_Stacked', e); 
         % Labels for channels
         if ~isempty(kept_channels)
             chanLabelAll = arrayfun(@(kk) sprintf('row %d (CSC%d)', chSel(kk), kept_channels(chSel(kk))), 1:nCh, 'UniformOutput', false);
@@ -368,30 +373,52 @@ fprintf('Spectrogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
             ylim(ax1, yL_global);
             xlim(ax1, [-100 100]); xticks(ax1, [-100 0 100]);
             ax1.TickDir = 'out'; ax1.FontSize = 9;
-            ax1.XTickLabel = [];               % hide to let spectrogram carry the ms labels
+            ax1.XTickLabel = [];               % hide to let scalogram carry the ms labels
             ylabel(ax1, '\muV');
             title(ax1, sprintf('%s — waveform', chanLabelAll{ci}), 'FontSize',9, 'FontWeight','normal');
-            % Spectrogram
+            
+            % --- SCALOGRAM (CWT) PLOT ---
             ax2 = nexttile(tl);
+            
+            % --- MODIFIED: Reverted to imagesc ---
             imagesc(ax2, D.Tms, D.F, D.P);
+            % --- END MODIFIED ---
+
             axis(ax2,'xy');
-            colormap(ax2, parula);
+            
+            colormap(ax2, plasma);
+            ax2.YScale = 'log';   % <-- Log scale
             caxis(ax2, [pLo pHi]);
             xline(ax2,0,'--k','LineWidth',0.9,'Color',[0 0 0 0.6]);
-            ylim(ax2, [0 fMax]);
-            xlim(ax2, [-100 100]); xticks(ax2, [-100 0 100]);
+            
+            % --- MODIFIED: Removed manual ylim to let imagesc auto-size ---
+            % This will prevent the clipping that causes the white gap.
+            % ylim(ax2, [fMin fMax]); % <-- REMOVED
+            
+            % --- MODIFIED: Set clean, minimal Y-ticks ---
+            baseTicks = [10, 100, 1000];
+            ticks = baseTicks(baseTicks >= fMin & baseTicks <= fMax);
+            ticks = unique([fMin, ticks, fMax]);
+            ticks = ticks(ticks >= fMin & ticks <= fMax);
+            
+            ax2.YTick = ticks;
+            % --- END MODIFIED ---
+            
+            xlim(ax2, [-100 100]); % Set X-limits
+            xticks(ax2, [-100 0 100]);
             ax2.TickDir = 'out'; ax2.FontSize = 9;
             ylabel(ax2, 'Hz');
             if ci == nCh, xlabel(ax2,'Time (ms)'); else, ax2.XTickLabel = []; end
-            title(ax2, sprintf('%s — spectrogram (0..%.0f Hz)', chanLabelAll{ci}, fMax), 'FontSize',9, 'FontWeight','normal');
+            
+            title(ax2, sprintf('%s — scalogram (%.0f–%.0f Hz)', chanLabelAll{ci}, fMin, fMax), 'FontSize',9, 'FontWeight','normal');
         end
         % One colorbar is enough (right side)
         cb = colorbar('eastoutside');
-        cb.Label.String = sprintf('Power (dB) | CLim [%.1f, %.1f]', pLo, pHi);
+        cb.Label.String = sprintf('Log Magnitude | CLim [%.1f, %.1f]', pLo, pHi);
         
-        % --- MODIFIED SGTITLE ---
-        sg = sprintf('%s | %s | align: %s | Window: \\pm100 ms | STFT win=%.1f ms ov=%.0f%% nfft=%d | chans=%s', ...
-                     tag, baseName, anchorDesc, 1e3*specWinSamp/sfx, 100*specOverlapSamp/specWinSamp, nfft, mat2str(chSel));
+        % --- MODIFIED SGTITLE (STFT info removed) ---
+        sg = sprintf('%s | %s | align: %s | Window: \\pm100 ms | CWT (Morlet) | chans=%s', ...
+                     tag, baseName, anchorDesc, mat2str(chSel));
         sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
         
         % --- MODIFIED: Export PNG and PDF ---

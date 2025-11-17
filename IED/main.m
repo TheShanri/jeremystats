@@ -24,13 +24,15 @@
 %CSD_CenterSlices_Waveforms_AvgGroups("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
 %CSD_TimeAvgSlices_Waveforms_AvgGroups("C:\Users\Z390\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Z390\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk_uV.mat")
 
-%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 2\PTEN_M13_pten_HF4s1aug1\group_05-10 (1)")
+%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_m28_ptenblind_m28s15jun19", 'anchorMidpoint', true)
+%TheVisionOverlay("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M13_pten_HF4s1aug1")
 
-%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M5_Pten_M5s7nov17", 'anchorHalfWidthMs', 20e-3)
-%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)", 'anchorHalfWidthMs', 20e-3, 'anchorPolarity', 'neg', 'anchorChannel', 20)
+%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)", 'anchorMidpoint', true)
 %spreadsheet_to_graph("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)\ets_converted_events.xlsx","C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)\LL_input_2023-09-20_12-55-14_mex_disk_uV.mat")
-spreadsheet_to_gui("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)\ets_converted_events.xlsx","C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept20 (All Garbage)\LL_input_2023-09-20_12-55-14_mex_disk_uV.mat")
+%spreadsheet_to_gui("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_m28_ptenblind_m28s15jun19\ets_converted_events - Copy.xlsx","C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_m28_ptenblind_m28s15jun19\LL_input_2024-06-19_15-24-56_mex_disk_uV.mat")
 
+%Analyze_MatFile_Start("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_m28_ptenblind_m28s15jun19\LL_input_2024-06-19_15-24-56_mex_disk_uV.mat")
+%diagnose_VACC_CSC_timing("D:\PTEN\PTEN\m28_ptenblind\m28s15jun19\2024-06-19_15-24-56", true)
 %Pipeline_Main("C:\Users\info\Desktop\Barry\IED DATA LOCAL\Take 2\M13s1_group_05-10_sorted","C:\Users\info\Desktop\Barry\IED DATA LOCAL\Take 2\LL_input_2023-08-01_11-37-10_mex_disk_uV.mat")
 %convert_fig_to_svg_robust("C:\Users\info\Desktop\Barry\jeremystats\IED\Theta Graph Data\theta.fig")
 %ThetaRaster("C:\Users\Z390\Desktop\jeremystats\IED\Theta Graph Data")
@@ -40,9 +42,35 @@ spreadsheet_to_gui("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M3_pten_m3s2sept2
 %BatchConvert_CSC_fromSheet("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN","C:\Users\Z390\Desktop\IED DATA\Converted Data")
 %RunLLspikedetector_Folder("C:\Users\Barry Lab\Desktop\IED DATA\Batch raw Data")
 %BuildBatchInputCSV_fromSheet("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN")
+
+
+
+%% Gap fix
+%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\Gap Trouble shooting\PTEN_M13_pten_HF4s2aug1 (Sanity Check)", 'anchorHalfWidthMs', 30e-3)
+%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\Gap Trouble shooting\PTEN_M34_ptenblind_m34s8jun10 (w Gaps)")
+Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M5_Pten_M5s5nov16")
+
 %% Other workspace
 %SpectrogramRaster_Events_Stitched("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
 %SpectrogramRaster_RepSample("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
 %Spectrogram_Waveform_Stacked_FirstEvent("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
 %Pipeline_Main("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")
 %vacc_ied_detect_chunked_thr(186565)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -103,111 +103,111 @@ catch ME
 end
 fprintf('--------------------------------------------------------\n');
 
-% ---------- 1) EventStacks (CENTER) ----------
-fprintf('===== [1] RUNNING EventStacks_ampWidth_Avg_Pipeline =====\n');
-evtStacksRes = [];
-try
-    evtStacksRes = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
-    fprintf('  [1] SUCCESS: EventStacks_ampWidth_Avg_Pipeline completed.\n');
-    if isstruct(evtStacksRes) && isfield(evtStacksRes, 'pngSolid')
-        fprintf('      -> SOLID PNG: %s\n', getFieldSafe(evtStacksRes, 'pngSolid'));
-        fprintf('      -> SOLID PDF: %s\n', getFieldSafe(evtStacksRes, 'pdfSolid'));
-        fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(evtStacksRes, 'pngSputter'));
-        fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(evtStacksRes, 'pdfSputter'));
-        fprintf('      -> STATS CSV: %s\n', getFieldSafe(evtStacksRes, 'statsCSV'));
-    end
-catch ME
-    fprintf('  [1] FAILED: EventStacks_ampWidth_Avg_Pipeline.\n');
-    warning(ME.identifier, 'EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
-    fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
-end
-fprintf('--------------------------------------------------------\n');
+% % ---------- 1) EventStacks (CENTER) ----------
+% fprintf('===== [1] RUNNING EventStacks_ampWidth_Avg_Pipeline =====\n');
+% evtStacksRes = [];
+% try
+%     evtStacksRes = EventStacks_ampWidth_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
+%     fprintf('  [1] SUCCESS: EventStacks_ampWidth_Avg_Pipeline completed.\n');
+%     if isstruct(evtStacksRes) && isfield(evtStacksRes, 'pngSolid')
+%         fprintf('      -> SOLID PNG: %s\n', getFieldSafe(evtStacksRes, 'pngSolid'));
+%         fprintf('      -> SOLID PDF: %s\n', getFieldSafe(evtStacksRes, 'pdfSolid'));
+%         fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(evtStacksRes, 'pngSputter'));
+%         fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(evtStacksRes, 'pdfSputter'));
+%         fprintf('      -> STATS CSV: %s\n', getFieldSafe(evtStacksRes, 'statsCSV'));
+%     end
+% catch ME
+%     fprintf('  [1] FAILED: EventStacks_ampWidth_Avg_Pipeline.\n');
+%     warning(ME.identifier, 'EventStacks_ampWidth_Avg_Pipeline failed: %s', ME.message);
+%     fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
+% end
+% fprintf('--------------------------------------------------------\n');
+% 
+% % ---------- 2) Voltage Raster (LEFT) ----------
+% fprintf('===== [2] RUNNING VoltageRaster_EventsAvg_Pipeline =====\n');
+% voltRasterRes = [];
+% try
+%     voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
+%     fprintf('  [2] SUCCESS: VoltageRaster_EventsAvg_Pipeline completed.\n');
+%     if isstruct(voltRasterRes) && isfield(voltRasterRes, 'pngSolid')
+%         fprintf('      -> SOLID PNG: %s\n', getFieldSafe(voltRasterRes, 'pngSolid'));
+%         fprintf('      -> SOLID PDF: %s\n', getFieldSafe(voltRasterRes, 'pdfSolid'));
+%         fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(voltRasterRes, 'pngSputter'));
+%         fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(voltRasterRes, 'pdfSputter'));
+%         fprintf('      -> STATS CSV: %s\n', getFieldSafe(voltRasterRes, 'statsCSV'));
+%     end
+% catch ME
+%     fprintf('  [2] FAILED: VoltageRaster_EventsAvg_Pipeline.\n');
+%     warning(ME.identifier, 'VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
+%     fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
+% end
+% fprintf('--------------------------------------------------------\n');
+% 
+% % ---------- 3) CSD Raster (RIGHT) ----------
+% fprintf('===== [3] RUNNING CSDRaster_Avg_Pipeline =====\n');
+% csdRasterRes = [];
+% try
+%     csdRasterRes = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
+%     fprintf('  [3] SUCCESS: CSDRaster_Avg_Pipeline completed.\n');
+%     if isstruct(csdRasterRes) && isfield(csdRasterRes, 'pngSolid')
+%         fprintf('      -> SOLID PNG: %s\n', getFieldSafe(csdRasterRes, 'pngSolid'));
+%         fprintf('      -> SOLID PDF: %s\n', getFieldSafe(csdRasterRes, 'pdfSolid'));
+%         fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(csdRasterRes, 'pngSputter'));
+%         fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(csdRasterRes, 'pdfSputter'));
+%         fprintf('      -> STATS CSV: %s\n', getFieldSafe(csdRasterRes, 'statsCSV'));
+%     end
+% catch ME
+%     fprintf('  [3] FAILED: CSDRaster_Avg_Pipeline.\n');
+%     warning(ME.identifier, 'CSDRaster_Avg_Pipeline failed: %s', ME.message);
+%     fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
+% end
+% fprintf('--------------------------------------------------------\n');
+% 
+% % ---------- 4) CSD Center Slices + Vertical Waveforms (LEFT) ----------
+% fprintf('===== [4] RUNNING CSD_CenterSlices_Waveform_AvgGroups_Pipeline =====\n');
+% csdSlicesRes = [];
+% try
+%     csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
+%     fprintf('  [4] SUCCESS: CSD_CenterSlices_Waveform_AvgGroups_Pipeline completed.\n');
+%     if isstruct(csdSlicesRes) && isfield(csdSlicesRes, 'pngSolid')
+%         fprintf('      -> SOLID PNG: %s\n', getFieldSafe(csdSlicesRes, 'pngSolid'));
+%         fprintf('      -> SOLID PDF: %s\n', getFieldSafe(csdSlicesRes, 'pdfSolid'));
+%         fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(csdSlicesRes, 'pngSputter'));
+%         fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(csdSlicesRes, 'pdfSputter'));
+%         fprintf('      -> STATS CSV: %s\n', getFieldSafe(csdSlicesRes, 'statsCSV'));
+%     end
+% catch ME
+%     fprintf('  [4] FAILED: CSD_CenterSlices_Waveform_AvgGroups_Pipeline.\n');
+%     warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
+%     fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
+% end
+% fprintf('--------------------------------------------------------\n');
+% 
+% % ---------- 5) CSD Time-Avg Slices + Vertical Waveforms (RIGHT) ----------
+% fprintf('===== [5] RUNNING CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline =====\n');
+% csdTimeAvgRes = [];
+% try
+%     csdTimeAvgRes = CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
+%     fprintf('  [5] SUCCESS: CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline completed.\n');
+%     if isstruct(csdTimeAvgRes) && isfield(csdTimeAvgRes, 'pngSolid')
+%         fprintf('      -> SOLID PNG: %s\n', getFieldSafe(csdTimeAvgRes, 'pngSolid'));
+%         fprintf('      -> SOLID PDF: %s\n', getFieldSafe(csdTimeAvgRes, 'pdfSolid'));
+%         fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(csdTimeAvgRes, 'pngSputter'));
+%         fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(csdTimeAvgRes, 'pdfSputter'));
+%         fprintf('      -> STATS CSV: %s\n', getFieldSafe(csdTimeAvgRes, 'statsCSV'));
+%     end
+% catch ME
+%     fprintf('  [5] FAILED: CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline.\n');
+%     warning(ME.identifier, 'CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline failed: %s', ME.message);
+%     fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
+% end
+% fprintf('--------------------------------------------------------\n');
 
-% ---------- 2) Voltage Raster (LEFT) ----------
-fprintf('===== [2] RUNNING VoltageRaster_EventsAvg_Pipeline =====\n');
-voltRasterRes = [];
-try
-    voltRasterRes = VoltageRaster_EventsAvg_Pipeline(inputFolder, dataMatPath, varargin{:});
-    fprintf('  [2] SUCCESS: VoltageRaster_EventsAvg_Pipeline completed.\n');
-    if isstruct(voltRasterRes) && isfield(voltRasterRes, 'pngSolid')
-        fprintf('      -> SOLID PNG: %s\n', getFieldSafe(voltRasterRes, 'pngSolid'));
-        fprintf('      -> SOLID PDF: %s\n', getFieldSafe(voltRasterRes, 'pdfSolid'));
-        fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(voltRasterRes, 'pngSputter'));
-        fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(voltRasterRes, 'pdfSputter'));
-        fprintf('      -> STATS CSV: %s\n', getFieldSafe(voltRasterRes, 'statsCSV'));
-    end
-catch ME
-    fprintf('  [2] FAILED: VoltageRaster_EventsAvg_Pipeline.\n');
-    warning(ME.identifier, 'VoltageRaster_EventsAvg_Pipeline failed: %s', ME.message);
-    fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
-end
-fprintf('--------------------------------------------------------\n');
-
-% ---------- 3) CSD Raster (RIGHT) ----------
-fprintf('===== [3] RUNNING CSDRaster_Avg_Pipeline =====\n');
-csdRasterRes = [];
-try
-    csdRasterRes = CSDRaster_Avg_Pipeline(inputFolder, dataMatPath, varargin{:});
-    fprintf('  [3] SUCCESS: CSDRaster_Avg_Pipeline completed.\n');
-    if isstruct(csdRasterRes) && isfield(csdRasterRes, 'pngSolid')
-        fprintf('      -> SOLID PNG: %s\n', getFieldSafe(csdRasterRes, 'pngSolid'));
-        fprintf('      -> SOLID PDF: %s\n', getFieldSafe(csdRasterRes, 'pdfSolid'));
-        fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(csdRasterRes, 'pngSputter'));
-        fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(csdRasterRes, 'pdfSputter'));
-        fprintf('      -> STATS CSV: %s\n', getFieldSafe(csdRasterRes, 'statsCSV'));
-    end
-catch ME
-    fprintf('  [3] FAILED: CSDRaster_Avg_Pipeline.\n');
-    warning(ME.identifier, 'CSDRaster_Avg_Pipeline failed: %s', ME.message);
-    fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
-end
-fprintf('--------------------------------------------------------\n');
-
-% ---------- 4) CSD Center Slices + Vertical Waveforms (LEFT) ----------
-fprintf('===== [4] RUNNING CSD_CenterSlices_Waveform_AvgGroups_Pipeline =====\n');
-csdSlicesRes = [];
-try
-    csdSlicesRes = CSD_CenterSlices_Waveform_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
-    fprintf('  [4] SUCCESS: CSD_CenterSlices_Waveform_AvgGroups_Pipeline completed.\n');
-    if isstruct(csdSlicesRes) && isfield(csdSlicesRes, 'pngSolid')
-        fprintf('      -> SOLID PNG: %s\n', getFieldSafe(csdSlicesRes, 'pngSolid'));
-        fprintf('      -> SOLID PDF: %s\n', getFieldSafe(csdSlicesRes, 'pdfSolid'));
-        fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(csdSlicesRes, 'pngSputter'));
-        fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(csdSlicesRes, 'pdfSputter'));
-        fprintf('      -> STATS CSV: %s\n', getFieldSafe(csdSlicesRes, 'statsCSV'));
-    end
-catch ME
-    fprintf('  [4] FAILED: CSD_CenterSlices_Waveform_AvgGroups_Pipeline.\n');
-    warning(ME.identifier, 'CSD_CenterSlices_Waveform_AvgGroups_Pipeline failed: %s', ME.message);
-    fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
-end
-fprintf('--------------------------------------------------------\n');
-
-% ---------- 5) CSD Time-Avg Slices + Vertical Waveforms (RIGHT) ----------
-fprintf('===== [5] RUNNING CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline =====\n');
-csdTimeAvgRes = [];
-try
-    csdTimeAvgRes = CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline(inputFolder, dataMatPath, varargin{:});
-    fprintf('  [5] SUCCESS: CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline completed.\n');
-    if isstruct(csdTimeAvgRes) && isfield(csdTimeAvgRes, 'pngSolid')
-        fprintf('      -> SOLID PNG: %s\n', getFieldSafe(csdTimeAvgRes, 'pngSolid'));
-        fprintf('      -> SOLID PDF: %s\n', getFieldSafe(csdTimeAvgRes, 'pdfSolid'));
-        fprintf('      -> SPUTTER PNG: %s\n', getFieldSafe(csdTimeAvgRes, 'pngSputter'));
-        fprintf('      -> SPUTTER PDF: %s\n', getFieldSafe(csdTimeAvgRes, 'pdfSputter'));
-        fprintf('      -> STATS CSV: %s\n', getFieldSafe(csdTimeAvgRes, 'statsCSV'));
-    end
-catch ME
-    fprintf('  [5] FAILED: CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline.\n');
-    warning(ME.identifier, 'CSD_TimeAvgSlices_Waveforms_AvgGroups_Pipeline failed: %s', ME.message);
-    fprintf('      -> Error details: %s (Identifier: %s)\n', ME.message, ME.identifier);
-end
-fprintf('--------------------------------------------------------\n');
-
-% ---------- 6) Spectrogram + Waveform (LEFT, bottom) ----------
-fprintf('===== [6] RUNNING Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline =====\n');
+% ---------- 6) Scalogram + Waveform (LEFT, bottom) ----------
+fprintf('===== [6] RUNNING Scalogram_Waveform_Stacked_ThirdEvent_Pipeline =====\n');
 spec3rdRes = [];
 try
-    spec3rdRes = Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline(inputFolder, dataMatPath, varargin{:});
+    spec3rdRes = Scalogram_Waveform_Stacked_ThirdEvent_Pipeline(inputFolder, dataMatPath, varargin{:});
     fprintf('  [6] SUCCESS: Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline completed.\n');
     if isstruct(spec3rdRes) && isfield(spec3rdRes, 'pngSolid')
         fprintf('      -> SOLID PNG: %s\n', getFieldSafe(spec3rdRes, 'pngSolid'));
