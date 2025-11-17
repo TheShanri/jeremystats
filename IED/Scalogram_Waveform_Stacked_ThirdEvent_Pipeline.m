@@ -107,6 +107,7 @@ outSPU  = fullfile(outRoot, "Sputter");
 if ~exist(outRoot,'dir'), mkdir(outRoot); end
 if ~exist(outSOL,'dir'),  mkdir(outSOL);  end
 if ~exist(outSPU,'dir'),  mkdir(outSPU);  end
+
 % ---------- Data ----------
 assert(isfile(dataMatPath), 'Data MAT not found: %s', dataMatPath);
 mf = matfile(dataMatPath);
@@ -114,6 +115,7 @@ try sfx = mf.sfx; catch, error('Missing "sfx" in data MAT.'); end
 nRowsAll = size(mf,'d',1);
 nSamp    = size(mf,'d',2);
 try kept_channels = mf.kept_channels; catch, kept_channels = []; end %#ok<NASGU>
+
 % Scaling vector
 if numel(scaleToMicroV)==1
     scaleVec = repmat(scaleToMicroV, nRowsAll, 1);
@@ -121,6 +123,7 @@ else
     assert(numel(scaleToMicroV) >= nRowsAll, 'scaleToMicroV must be scalar or length >= nRowsAll.');
     scaleVec = scaleToMicroV(:);
 end
+
 % ---------- Excel on/off ----------
 T = readtable(excelPath, 'ReadVariableNames', true);
 canon = lower(regexprep(T.Properties.VariableNames, '[^a-zA-Z0-9]', ''));
@@ -142,10 +145,12 @@ end
 onSamp  = max(1, min(onSamp,  nSamp));
 offSamp = max(1, min(offSamp, nSamp));
 NrowsXL = numel(onSamp);
+
 % ---------- Events from PNG names ----------
 evtSOL = parseEvtNumsFromPngs(solidDir);
 evtSPU = parseEvtNumsFromPngs(sputterDir);
 fprintf('Found %d SOLID, %d SPUTTER (by filenames). Using the 3rd of each if present.\n', numel(evtSOL), numel(evtSPU));
+
 % ---------- Channel selection (flexible & even-aware) ----------
 if ~isempty(chUser)
     chBase = chUser(:).';
@@ -172,28 +177,22 @@ fprintf('Selected %d channels for Scalogram: %s\n', nCh, mat2str(chSel));
 % ---------- Render 3rd event (or 1st) of each group ----------
 % --- MODIFIED: Default to 1st event if 3rd is not available ---
 if numel(evtSOL) >= 3
-    % Has 3 or more, use the 3rd
     fprintf('SOLID: Found %d events, using 3rd event (Evt %d).\n', numel(evtSOL), evtSOL(3));
     [out.pngSolid, out.pdfSolid] = renderOne(evtSOL(3), 'SOLID', outSOL, chSel);
 elseif numel(evtSOL) >= 1
-    % Has 1 or 2, use the 1st
     warning('SOLID: Found only %d events (fewer than 3). Defaulting to 1st event (Evt %d).', numel(evtSOL), evtSOL(1));
     [out.pngSolid, out.pdfSolid] = renderOne(evtSOL(1), 'SOLID', outSOL, chSel);
 else
-    % Has 0
     warning('SOLID: No events found — skipping scalogram.');
 end
 
 if numel(evtSPU) >= 3
-    % Has 3 or more, use the 3rd
     fprintf('SPUTTER: Found %d events, using 3rd event (Evt %d).\n', numel(evtSPU), evtSPU(3));
     [out.pngSputter, out.pdfSputter] = renderOne(evtSPU(3), 'SPUTTER', outSPU, chSel);
 elseif numel(evtSPU) >= 1
-    % Has 1 or 2, use the 1st
     warning('SPUTTER: Found only %d events (fewer than 3). Defaulting to 1st event (Evt %d).', numel(evtSPU), evtSPU(1));
     [out.pngSputter, out.pdfSputter] = renderOne(evtSPU(1), 'SPUTTER', outSPU, chSel);
 else
-    % Has 0
     warning('SPUTTER: No events found — skipping scalogram.');
 end
 % --- END MODIFIED ---
@@ -203,7 +202,6 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
 % ======================================================================
 %                              NESTED: RENDER
 % ======================================================================
-    % --- MODIFIED: Function signature ---
     function [outPng, outPdf] = renderOne(e, tag, outDir, chSel)
         outPng = "";
         outPdf = "";
@@ -225,33 +223,26 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         
         % --- MODIFIED ANCHOR LOGIC ---
         if anchorMidpoint == true
-            % Option 1: Use midpoint, skip search
             anchor = ancMid;
             anchorDesc = "Event Midpoint";
         else
-            % Option 2: Perform peak-finding search
-            
-            % Determine reference channel
             if anchorChannel == 0
                 refCh = chSel(end); % Default: last *selected* channel
             else
-                % Use user-specified channel, with validation
                 if anchorChannel < 1 || anchorChannel > nRowsAll || ~any(chSel == anchorChannel)
                     warning('Invalid or unselected anchorChannel %d. Reverting to last selected channel (%d).', anchorChannel, chSel(end));
                     refCh = chSel(end);
                 else
-                    refCh = anchorChannel; % Use specified, valid row
+                    refCh = anchorChannel;
                 end
             end
             
             anchorDesc = sprintf("%s peak on row %d (±%.1f ms)", ...
                                  anchorPolarity, refCh, 1e3*anchorHWms);
             
-            % Define search window
             s0a = max(1, ancMid - HWanchor);
             s1a = min(nSamp, ancMid + HWanchor);
             
-            % Get data from reference channel
             scRef = scaleVec(refCh);
             y0 = double(mf.d(refCh, s0a:s1a)) * scRef;
             
@@ -259,7 +250,6 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
                 warning('%s Evt %d: no finite data for anchor.', tag, e); return;
             end
             
-            % Find peak based on polarity
             switch anchorPolarity
                 case 'pos'
                     [~, k_rel] = max(y0);
@@ -268,9 +258,8 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
                 case 'abs'
                     [~, k_rel] = max(abs(y0));
                 otherwise
-                    [~, k_rel] = max(y0); % Default to pos
+                    [~, k_rel] = max(y0);
             end
-            
             anchor = s0a + k_rel - 1;
         end
         
@@ -302,7 +291,7 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         
         % --- CWT params ---
         fMax = min(fMaxHz, sfx/2);
-        fMin = max(fMinHz, 0.1); % Ensure positive fMin
+        fMin = max(fMinHz, 0.1);
         if fMin >= fMax, fMin = fMax/100; end
         
         % --- Precompute CWT & CLim across selected channels ---
@@ -314,16 +303,15 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
             y  = double(mf.d(ch, s0:s1)) * sc;
             y(~isfinite(y)) = 0;
             
-            % --- CWT CALCULATION ---
-            % Compute CWT only within the frequency limits
-            [C, F] = cwt(y, sfx, 'FrequencyLimits', [fMin fMax]);
-            % Get log-magnitude (plot log10(abs(C)))
-            P = log10(abs(C) + eps);
+            % --- CWT CALCULATION (full, then crop to [fMin,fMax]) ---
+            [C, F] = cwt(y, sfx);   % full frequency range
+            idxF = (F >= fMin & F <= fMax);
+            F    = F(idxF);
+            C    = C(idxF, :);
+            P    = log10(abs(C) + eps);
             % --- END CWT CALCULATION ---
             
-            % Time vector is just the relative window time
-            Tms = tRelMs; 
-            
+            Tms = tRelMs;
             Pane{ci} = struct('y',y, 'Tms',Tms, 'F',F, 'P',P);
             allP = [allP; P(:)]; %#ok<AGROW>
         end
@@ -332,7 +320,7 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         pLo = pHi - climDynRange;
         
         % ---------- Figure ----------
-        rowsPerChan = 2;                 % waveform + scalogram
+        rowsPerChan = 2;
         rowsTotal   = rowsPerChan * nCh;
         perRowPx   = 130;
         figW       = 1000;
@@ -340,30 +328,28 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         figH_full  = topBotPad + perRowPx*rowsTotal;
         figH       = min(figH_full, maxFigH);
         if ~exist(outDir,'dir'), mkdir(outDir); end
-        % --- Base name unchanged for compatibility ---
-        baseName = sprintf('Evt%03d_SpecWave_Stacked', e); 
-        % Labels for channels
+        baseName = sprintf('Evt%03d_SpecWave_Stacked', e);
+        
         if ~isempty(kept_channels)
             chanLabelAll = arrayfun(@(kk) sprintf('row %d (CSC%d)', chSel(kk), kept_channels(chSel(kk))), 1:nCh, 'UniformOutput', false);
         else
             chanLabelAll = arrayfun(@(kk) sprintf('row %d', chSel(kk)), 1:nCh, 'UniformOutput', false);
         end
-        % Single figure expected (4 channels → no chunking)
+        
         f = figure('Color','w','Visible','off','Units','pixels', ...
                    'Position',[60 60 figW figH], 'Renderer','opengl', ...
                    'InvertHardcopy','off');
         
-        % --- START: Full Manual PDF Layout Control (Lesson 4) ---
         set(f, 'Units', 'inches');
         figPos_inches = get(f, 'Position');
         set(f, 'PaperUnits', 'inches');
         set(f, 'PaperSize', [figPos_inches(3) figPos_inches(4)]);
         set(f, 'PaperPosition', [0 0 figPos_inches(3) figPos_inches(4)]);
-        % --- END: Full Manual PDF Layout Control ---
         
         tl = tiledlayout(f, rowsTotal, 1, 'Padding','loose','TileSpacing','compact');
         for ci = 1:nCh
             D  = Pane{ci};
+            
             % Waveform
             ax1 = nexttile(tl);
             hold(ax1,'on'); box(ax1,'on'); grid(ax1,'on');
@@ -373,78 +359,74 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
             ylim(ax1, yL_global);
             xlim(ax1, [-100 100]); xticks(ax1, [-100 0 100]);
             ax1.TickDir = 'out'; ax1.FontSize = 9;
-            ax1.XTickLabel = [];               % hide to let scalogram carry the ms labels
+            ax1.XTickLabel = [];
             ylabel(ax1, '\muV');
             title(ax1, sprintf('%s — waveform', chanLabelAll{ci}), 'FontSize',9, 'FontWeight','normal');
             
             % --- SCALOGRAM (CWT) PLOT ---
             ax2 = nexttile(tl);
             
-            % --- MODIFIED: Reverted to imagesc ---
+            % Use imagesc with actual F range; then log-scale axis.
             imagesc(ax2, D.Tms, D.F, D.P);
-            % --- END MODIFIED ---
-
-            axis(ax2,'xy');
+            set(ax2,'YDir','normal');
+            set(ax2,'YScale','log');
             
             colormap(ax2, plasma);
-            ax2.YScale = 'log';   % <-- Log scale
             caxis(ax2, [pLo pHi]);
             xline(ax2,0,'--k','LineWidth',0.9,'Color',[0 0 0 0.6]);
             
-            % --- MODIFIED: Removed manual ylim to let imagesc auto-size ---
-            % This will prevent the clipping that causes the white gap.
-            % ylim(ax2, [fMin fMax]); % <-- REMOVED
+            % *** KEY FIX: match limits exactly to data to avoid white bands ***
+            ylim(ax2, [D.F(1) D.F(end)]);
             
-            % --- MODIFIED: Set clean, minimal Y-ticks ---
-            baseTicks = [10, 100, 1000];
-            ticks = baseTicks(baseTicks >= fMin & baseTicks <= fMax);
-            ticks = unique([fMin, ticks, fMax]);
-            ticks = ticks(ticks >= fMin & ticks <= fMax);
-            
+            % Clean Y-ticks within actual frequency range
+            baseTicks = [10, 20, 50, 100, 200, 500, 1000, 2000];
+            ticks = baseTicks(baseTicks >= D.F(1) & baseTicks <= D.F(end));
+            if isempty(ticks)
+                ticks = [D.F(1), D.F(end)];
+            end
             ax2.YTick = ticks;
-            % --- END MODIFIED ---
             
-            xlim(ax2, [-100 100]); % Set X-limits
+            xlim(ax2, [-100 100]);
             xticks(ax2, [-100 0 100]);
             ax2.TickDir = 'out'; ax2.FontSize = 9;
             ylabel(ax2, 'Hz');
-            if ci == nCh, xlabel(ax2,'Time (ms)'); else, ax2.XTickLabel = []; end
+            if ci == nCh
+                xlabel(ax2,'Time (ms)');
+            else
+                ax2.XTickLabel = [];
+            end
             
-            title(ax2, sprintf('%s — scalogram (%.0f–%.0f Hz)', chanLabelAll{ci}, fMin, fMax), 'FontSize',9, 'FontWeight','normal');
+            title(ax2, sprintf('%s — scalogram (%.0f–%.0f Hz)', chanLabelAll{ci}, fMin, fMax), ...
+                  'FontSize',9, 'FontWeight','normal');
         end
-        % One colorbar is enough (right side)
+        
         cb = colorbar('eastoutside');
         cb.Label.String = sprintf('Log Magnitude | CLim [%.1f, %.1f]', pLo, pHi);
         
-        % --- MODIFIED SGTITLE (STFT info removed) ---
         sg = sprintf('%s | %s | align: %s | Window: \\pm100 ms | CWT (Morlet) | chans=%s', ...
                      tag, baseName, anchorDesc, mat2str(chSel));
         sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
         
-        % --- MODIFIED: Export PNG and PDF ---
         drawnow;
         
-        % Define paths
         outPng = fullfile(outDir, baseName + ".png");
         outPdf = fullfile(outDir, baseName + ".pdf");
         
-        % Save PNG
         exportgraphics(f, outPng, 'Resolution', dpi, 'BackgroundColor','white', 'ContentType','image');
         fprintf('Saved %s (PNG): %s\n', tag, outPng);
         
-        % Save PDF (Lessons 1, 2, 3)
         try
             print(f, outPdf, '-dpdf', '-painters');
             fprintf('Saved %s (PDF): %s\n', tag, outPdf);
         catch ME
             warning('Failed to save PDF file %s: %s', outPdf, ME.message);
-            outPdf = ''; % Return empty string if failed
+            outPdf = '';
         end
         
         close(f);
-        % --- END MODIFIED ---
     end
 end
+
 % ======================================================================
 %                              HELPERS
 % ======================================================================
