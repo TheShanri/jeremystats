@@ -44,11 +44,13 @@
 %BuildBatchInputCSV_fromSheet("D:\PTEN\Mouse Recording Sessions.xlsx","D:\PTEN")
 
 
+%spreadsheet_to_gui("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M5_Pten_M5s7nov17 (Handsorted)\ets_converted_events.xlsx","C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M5_Pten_M5s7nov17 (Handsorted)\LL_input_2023-11-17_14-23-24_mex_disk_uV.mat")
 
-%% Gap fix
-%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\Gap Trouble shooting\PTEN_M13_pten_HF4s2aug1 (Sanity Check)", 'anchorHalfWidthMs', 30e-3)
-%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\Gap Trouble shooting\PTEN_M34_ptenblind_m34s8jun10 (w Gaps)")
-Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M5_Pten_M5s5nov16")
+%% Burn and churn
+%Pipeline_main_loop("C:\Users\Z390\Desktop\IED DATA\Take 3")
+%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M13_pten_m13s17aug4",'anchorChannel',24, 'anchorHalfWidthMs', 10e-3)
+%Pipeline_Main("C:\Users\Z390\Desktop\IED DATA\Take 3\PTEN_M13_pten_m13s2aug1")
+VoltageRaster_GrandAverage("C:\Users\Z390\Desktop\IED DATA\Take 3")
 
 %% Other workspace
 %SpectrogramRaster_Events_Stitched("C:\Users\Barry Lab\Desktop\IED DATA\Preped Data - M13s2aug1","C:\Users\Barry Lab\Desktop\IED DATA\LL_input_M13s2aug1_2023-08-01_12-11-26_mex_disk.mat")

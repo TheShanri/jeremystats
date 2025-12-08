@@ -33,7 +33,7 @@ p.addParameter('channelIndices', [], @(v) isempty(v) || (isnumeric(v) && all(v>=
 p.addParameter('scaleToMicroV', 1, @(x)isnumeric(x) && all(isfinite(x)) && all(x>0));
 p.addParameter('winHalfWidthMs',    20e-3, @(x)isfinite(x)&&x>0);   % ±20 ms around anchor
 p.addParameter('anchorHalfWidthMs',  5e-3, @(x)isfinite(x)&&x>0);   % ±5 ms anchor search
-p.addParameter('avgStartMs',         0e-3, @(x)isfinite(x));        % time-avg start (rel to anchor)
+p.addParameter('avgStartMs',         2e-3, @(x)isfinite(x));        % time-avg start (rel to anchor)
 p.addParameter('avgEndMs',          15e-3, @(x)isfinite(x));        % time-avg end   (rel to anchor)
 p.addParameter('sliceThickness', 6, @(x)isfinite(x) && x>=1 && mod(x,1)==0);
 p.addParameter('robustPct',    99.5, @(x) isfinite(x) && x>0 && x<100);
@@ -188,15 +188,12 @@ end
 % --- MODIFIED: Function signature ---
 function [Tstats, ok, outPdfPath] = buildAndRender(evtList, tag, outPngPath, outPdfPath)
     Tstats = table(); ok = false;
-    if isempty(evtList)
-        warning('CSD_TimeAvg:%s:NoEvents', '%s: no events to plot.', tag); 
-        return;
-    end
     
-    % pull from outer scope
+    % Pull necessary variables from caller scope
+    outRoot = evalin('caller','outRoot'); 
     mf = evalin('caller','mf'); sfx = evalin('caller','sfx'); 
     chList = evalin('caller','chList'); nCh = evalin('caller','nCh');
-    kept_channels = evalin('caller','kept_channels'); %#ok<NASGU>
+    kept_channels = evalin('caller','kept_channels'); 
     scaleVec = evalin('caller','scaleVec');
     onSamp = evalin('caller','onSamp'); offSamp = evalin('caller','offSamp'); NrowsXL = evalin('caller','NrowsXL');
     HWanchor = evalin('caller','HWanchor'); HWwin = evalin('caller','HWwin');
@@ -204,16 +201,19 @@ function [Tstats, ok, outPdfPath] = buildAndRender(evtList, tag, outPngPath, out
     sliceThick = evalin('caller','sliceThick'); robPct = evalin('caller','robPct'); padFrac = evalin('caller','padFrac');
     absoluteClim = evalin('caller','absoluteClim'); 
     
-    % --- NEW: Pull anchor params ---
     anchorMidpoint = evalin('caller', 'anchorMidpoint');
     anchorChannel  = evalin('caller', 'anchorChannel');
     anchorPolarity = evalin('caller', 'anchorPolarity');
     nRowsAll       = evalin('caller', 'nRowsAll');
     
-    anchorDesc = ""; % Define anchor description for title
-    % --- END NEW ---
+    anchorDesc = ""; 
+    if isempty(evtList)
+        warning('CSD_TimeAvg:%s:NoEvents', '%s: no events to plot.', tag); 
+        return;
+    end
     
-    S = nan(nCh, numel(evtList));  % per-event TIME-AVERAGED CSD (channels x events)
+    % ================= CALCULATION LOOP =================
+    S = nan(nCh, numel(evtList));  % The matrix that becomes the image
     used = false(numel(evtList),1);
     
     for ii = 1:numel(evtList)
@@ -225,202 +225,156 @@ function [Tstats, ok, outPdfPath] = buildAndRender(evtList, tag, outPngPath, out
         s1_ev = round(offSamp(rowXL));
         if ~(isfinite(s0_ev) && isfinite(s1_ev) && s1_ev > s0_ev), continue; end
         
-        % --- MODIFIED ANCHOR LOGIC ---
+        % Anchor Logic
         ancMid = round((s0_ev + s1_ev)/2);
-        
         if anchorMidpoint == true
-            % Option 1: Use midpoint, skip search
             anchor = ancMid;
             if ii == 1, anchorDesc = "Event Midpoint"; end
         else
-            % Option 2: Perform peak-finding search
+            if anchorChannel == 0, refCh = chList(end); else, refCh = anchorChannel; end
+            if anchorChannel < 0 || anchorChannel > nRowsAll, refCh = chList(end); end
             
-            % Determine reference channel
-            if anchorChannel == 0
-                refCh = chList(end); % Default: last channel
-            else
-                % Use user-specified channel, with validation
-                if anchorChannel < 1 || anchorChannel > nRowsAll || ~any(chList == anchorChannel)
-                    if ii == 1
-                        warning('Invalid or unselected anchorChannel %d. Reverting to last channel (%d).', anchorChannel, chList(end));
-                    end
-                    refCh = chList(end);
-                else
-                    refCh = anchorChannel; % Use specified, valid row
-                end
-            end
+            if ii == 1, anchorDesc = sprintf("%s peak on row %d", anchorPolarity, refCh); end
             
-            if ii == 1 % Print anchor method on first event
-                anchorDesc = sprintf("%s peak on row %d (±%.1f ms)", ...
-                                     anchorPolarity, refCh, 1e3*HWanchor/sfx);
-            end
-            
-            % Define search window
             s0a = max(1, ancMid - HWanchor);
             s1a = min(evalin('caller','nSamp'), ancMid + HWanchor);
-            
             y0 = double(mf.d(refCh, s0a:s1a)) * scaleVec(refCh);
             if isempty(y0) || all(~isfinite(y0)), continue; end
             
-            % Find peak based on polarity
             switch anchorPolarity
-                case 'pos'
-                    [~, k_rel] = max(y0);
-                case 'neg'
-                    [~, k_rel] = min(y0);
-                case 'abs'
-                    [~, k_rel] = max(abs(y0));
-                otherwise
-                    [~, k_rel] = max(y0); % Default to pos
+                case 'pos', [~, k_rel] = max(y0);
+                case 'neg', [~, k_rel] = min(y0);
+                case 'abs', [~, k_rel] = max(abs(y0));
+                otherwise,  [~, k_rel] = max(y0);
             end
-            
             anchor = s0a + k_rel - 1;
         end
         
         if ii == 1, fprintf('(%s) Align: %s\n', tag, anchorDesc); end
-        % --- END MODIFIED ANCHOR LOGIC ---
         
-        % Window around anchor
-        s0 = anchor - HWwin;
-        s1 = anchor + HWwin;
+        % Data Extraction
+        s0 = anchor - HWwin; s1 = anchor + HWwin;
         if s0 < 1 || s1 > evalin('caller','nSamp'), continue; end
         
-        % Extract block (channels x time) and CSD
         Y = nan(nCh, 2*HWwin+1);
         for k = 1:nCh
             ch = chList(k);
-            sc = scaleVec(ch);
-            y = double(mf.d(ch, s0:s1)) * sc;
-            if any(isfinite(y)), Y(k,:) = y; end
+            Y(k,:) = double(mf.d(ch, s0:s1)) * scaleVec(ch);
         end
         if all(~isfinite(Y(:))), continue; end
         
-        C = computeCSD(Y); % channels x time
-        % TIME-AVERAGE over [i0..i1]
-        S(:,ii) = mean(C(:, i0:i1), 2, 'omitnan');
+        C = computeCSD(Y); 
+        S(:,ii) = mean(C(:, i0:i1), 2, 'omitnan'); % Time-Averaging
         used(ii) = true;
     end
     
     if ~any(used)
-        warning('CSD_TimeAvg:%s:NoUsable', '%s: no usable events after alignment and windowing.', tag);
+        warning('CSD_TimeAvg:%s:NoUsable', '%s: no usable events.', tag);
         return;
     end
-    if anchorDesc == "", anchorDesc = "N/A (no events)"; end % Handle edge case
     
-    S = S(:,used);              % keep only used events
+    S = S(:,used);      
+    evtList = evtList(used); 
     nEvt = size(S,2);
-    MU  = mean(S,2, 'omitnan'); % mean vertical waveform (channels)
-    
-    % Robust symmetric scale
-    if ~isempty(absoluteClim)
-        clim = absoluteClim; % Use the user-provided absolute value
-    else
-        % Original autoscaling logic
-        vals = abs(S(:)); vals = vals(isfinite(vals));
-        if isempty(vals), pval = 1; else, pval = prctile(vals, robPct); end
-        clim = (1 + padFrac) * max(1, pval);
-    end
-    
-    % -------- Figure (tight alignment) --------
-    figH = min(320 + 14*nCh, 3400);
-    f = figure('Color','w','Position',[60 60 1200 figH],'Visible','off');
-    
-    % --- START: Full Manual PDF Layout Control (Lesson 4) ---
-    set(f, 'Units', 'inches');
-    figPos_inches = get(f, 'Position');
-    set(f, 'PaperUnits', 'inches');
-    set(f, 'PaperSize', [figPos_inches(3) figPos_inches(4)]);
-    set(f, 'PaperPosition', [0 0 figPos_inches(3) figPos_inches(4)]);
-    % --- END: Full Manual PDF Layout Control ---
-    
-    % One tiledlayout
-    tl = tiledlayout(f, 1, 2, 'Padding','compact', 'TileSpacing','compact');
-    
-    % Channel labels once (left only)
+    MU  = mean(S,2, 'omitnan'); 
+    % Generate Channel Labels
     if isempty(kept_channels)
         chanLabels = arrayfun(@(kk) sprintf('row %d', chList(kk)), 1:nCh, 'UniformOutput',false);
     else
         chanLabels = arrayfun(@(kk) sprintf('row %d (CSC%d)', chList(kk), kept_channels(chList(kk))), 1:nCh, 'UniformOutput',false);
     end
+    % ================= EXPORT RAW VALUES =================
+    try
+        % 1. Define Column Headers (Event IDs)
+        colHeaders = arrayfun(@(x) sprintf('Evt_%d', x), evtList, 'UniformOutput', false);
+        
+        % 2. Create Table
+        T_export = table(chanLabels(:), 'VariableNames', {'Channel'});
+        T_data = array2table(S, 'VariableNames', colHeaders);
+        T_export = [T_export, T_data];
+        
+        % 3. Save with NEW FILENAME
+        csvValPath = fullfile(outRoot, sprintf('CSD_Timeslices_Values_%s.csv', tag));
+        writetable(T_export, csvValPath);
+        fprintf('Saved Raw Values: %s\n', csvValPath);
+    catch ME
+        warning('Failed to save raw values CSV: %s', ME.message);
+    end
+    % ==============================================================
     
-    % LEFT: per-event time-avg image (repeat columns = thickness)
+    % Scaling logic
+    if ~isempty(absoluteClim)
+        clim = absoluteClim;
+    else
+        vals = abs(S(:)); vals = vals(isfinite(vals));
+        if isempty(vals), pval = 1; else, pval = prctile(vals, robPct); end
+        clim = (1 + padFrac) * max(1, pval);
+    end
+    
+    % ================= PLOTTING =================
+    figH = min(320 + 14*nCh, 3400);
+    f = figure('Color','w','Position',[60 60 1200 figH],'Visible','off');
+    set(f, 'Units', 'inches'); figPos = get(f, 'Position');
+    set(f, 'PaperUnits', 'inches', 'PaperSize', figPos(3:4), 'PaperPosition', [0 0 figPos(3:4)]);
+    
+    tl = tiledlayout(f, 1, 2, 'Padding','compact', 'TileSpacing','compact');
+    
     ax1 = nexttile(tl); 
     hold(ax1, 'on');
+    
+    % --- HANDLE SLICE THICKNESS ---
     if sliceThick==1
-        Img = S;
+        Img = S; 
     else
-        Img = repelem(S, 1, sliceThick);
+        Img = repelem(S, 1, sliceThick); 
     end
     imagesc(ax1, 1:size(Img,2), 1:nCh, Img);
+    
     set(ax1,'YDir','reverse', 'YLim',[0.5 nCh+0.5], 'TickDir','out', ...
         'FontSize',9, 'YTick',1:nCh, 'YTickLabel',chanLabels, ...
         'Box','on', 'Layer','top', 'TickLength',[0 0]);
     caxis(ax1, [-clim, +clim]); colormap(ax1, jet);
     
-    % Event tick marks
+    axes(ax1); cb = colorbar; 
+    try, cb.Layout.Tile = 'east'; catch, set(cb,'Location','eastoutside'); end
+    cb.Label.String = sprintf('CSD units (CLim = \\pm%.2f)', clim);
+    
+    % --- FIX: CORRECT X-AXIS TICKS & ROTATION ---
     if sliceThick >= 2
-        centers = ((0:nEvt-1)*sliceThick) + ceil(sliceThick/2);
+        centers = ( (0:nEvt-1)*sliceThick ) + ceil(sliceThick/2);
     else
         centers = 1:nEvt;
     end
-    xticks(ax1, centers); xticklabels(ax1, string(1:nEvt));
-    xlabel(ax1, 'Event #'); ylabel(ax1, 'Channel (1 at top)');
+    xticks(ax1, centers); 
+    xticklabels(ax1, string(1:nEvt));
+    ax1.XTickLabelRotation = 0; % FORCE HORIZONTAL
+    % --------------------------------------------
     
-    % RIGHT: vertical waveform — all (gray) + average (black)
+    xlabel(ax1, 'Event #'); ylabel(ax1, 'Channel');
+    
     ax2 = nexttile(tl); 
     hold(ax2, 'on'); grid(ax2,'on'); box(ax2,'on');
     set(ax2,'YDir','reverse', 'YLim',[0.5 nCh+0.5], 'TickDir','out', ...
-        'FontSize',9, 'YTick',1:nCh, 'YTickLabel',[], ...
-        'Layer','top', 'TickLength',[0 0]);
+        'FontSize',9, 'YTick',1:nCh, 'YTickLabel',[], 'Layer','top');
     y = 1:nCh;
     for i = 1:nEvt
         plot(ax2, S(:,i), y, '-', 'Color', [0.6 0.6 0.6 0.8], 'LineWidth', 0.9);
     end
     plot(ax2, MU, y, '-', 'Color', [0 0 0], 'LineWidth', 2.0);
-    xline(ax2, 0, '--k', 'LineWidth', 0.8);
-    xlim(ax2, [-clim, +clim]);
-    xlabel(ax2, sprintf('CSD (avg %+.1f to %+.1f ms)\n(− sink   |   + source)', ...
-        1e3*evalin('caller','avgStartMs'), 1e3*evalin('caller','avgEndMs')));
+    xline(ax2, 0, '--k'); xlim(ax2, [-clim, +clim]);
     
-    % Link Y; shared colorbar
-    set([ax1 ax2], 'LooseInset', max(get(ax1,'TightInset'), get(ax2,'TightInset')));
     linkaxes([ax1 ax2], 'y');
-    axes(ax1); cb = colorbar; 
-    try, cb.Layout.Tile = 'east'; catch, set(cb,'Location','eastoutside'); end
-    cb.Label.String = sprintf('CSD units (CLim = \\pm%.2f)', clim);
-    
-    % Titles
-    title(ax1, sprintf('%s — TIME-AVG CSD (n=%d)', tag, nEvt), 'FontSize',10, 'FontWeight','bold');
-    title(ax2, sprintf('%s — Vertical waveform (mean in black)', tag), 'FontSize',10, 'FontWeight','bold');
-    
-    % --- MODIFIED SGTITLE ---
-    sg = sprintf('%s  |  align: %s  |  avg window [%+.1f,%+.1f] ms  |  channels=%d', ...
-        tag, anchorDesc, 1e3*evalin('caller','avgStartMs'), 1e3*evalin('caller','avgEndMs'), nCh);
+
+    sg = sprintf('%s  |  align: %s', tag, anchorDesc);
     sgtitle(tl, sg, 'FontSize',10, 'FontWeight','bold');
     
-    % --- MODIFIED: Export PNG and PDF ---
-    % Save PNG
     exportgraphics(f, outPngPath, 'Resolution', 220);
-    fprintf('Saved %s (PNG): %s\n', tag, outPngPath);
-    
-    % Save PDF (Lessons 1, 2, 3)
-    try
-        print(f, outPdfPath, '-dpdf', '-painters');
-        fprintf('Saved %s (PDF): %s\n', tag, outPdfPath);
-    catch ME
-        warning('Failed to save PDF file %s: %s', outPdfPath, ME.message);
-        outPdfPath = ''; % Return empty string if failed
-    end
-    
+    try print(f, outPdfPath, '-dpdf', '-painters'); catch, end
     close(f);
-    % --- END MODIFIED ---
     
     ok = true;
-    % --- MODIFIED: Stats table (per group) ---
-    Tstats = table(string(tag), nEvt, clim, ...
-                   anchorMidpoint, anchorChannel, string(anchorPolarity), ...
-                   'VariableNames', {'group','n_events','clim_used', ...
-                                     'AnchorMidpoint','AnchorChannelRow','AnchorPolarity'});
+    Tstats = table(string(tag), nEvt, clim, anchorMidpoint, anchorChannel, string(anchorPolarity), ...
+                   'VariableNames', {'group','n_events','clim_used','AnchorMidpoint','AnchorChannelRow','AnchorPolarity'});
 end
 function evts = parseEvtNumsFromPngs(dirpath)
     L = dir(fullfile(dirpath, '*.png')); evts = [];

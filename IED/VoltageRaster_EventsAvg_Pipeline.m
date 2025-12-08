@@ -182,6 +182,11 @@ end
 [S_mu, S_stats] = buildAvg(evtSOL, 'SOLID');
 [P_mu, P_stats] = buildAvg(evtSPU, 'SPUTTER');
 
+% --- NEW: Export Raw Values to CSV (matches CSD pipeline style) ---
+if ~isempty(S_mu), exportRasterValues(S_mu, 'SOLID'); end
+if ~isempty(P_mu), exportRasterValues(P_mu, 'SPUTTER'); end
+% --- END NEW ---
+
 % ---------------- Global CLim across BOTH averages ----------------
 if isempty(S_mu) && isempty(P_mu)
     warning('VoltageRaster_AvgGroups: no average rasters created.');
@@ -440,5 +445,36 @@ paths = struct('solidPng', pngSOL, 'sputterPng', pngSPU, 'solidPdf', pdfSOL, 'sp
                               'DisplayHalfWidth_ms','AnchorHalfWidth_ms', ...
                               'CLim_uV','MeanPeak_uV','SD_Peak_uV','MeanHW_ms','SD_HW_ms', ...
                               'AnchorMidpoint','AnchorChannelRow','AnchorPolarity'});
+    end
+
+    % --- NEW: Export Raster Values Helper ---
+    function exportRasterValues(MU, tag)
+        if isempty(MU), return; end
+        try
+            % 1. Create Column Headers (Time points)
+            % e.g. "T_minus20p0ms", "T_0p0ms"
+            tHeaders = arrayfun(@(t) sprintf('T_%.2fms', t), tRelMs, 'UniformOutput', false);
+            % Sanitize for table variables (replace . with p, - with minus/m)
+            tHeaders = strrep(tHeaders, '.', 'p');
+            tHeaders = strrep(tHeaders, '-', 'm');
+            
+            % 2. Create Channel Label Column
+            if isempty(kept_channels)
+                cLab = arrayfun(@(k) sprintf('row %d', chList(k)), 1:nCh, 'UniformOutput',false);
+            else
+                cLab = arrayfun(@(k) sprintf('row %d (CSC%d)', chList(k), kept_channels(chList(k))), 1:nCh, 'UniformOutput',false);
+            end
+
+            % 3. Assemble and Write Table
+            T_rows = table(cLab(:), 'VariableNames', {'Channel'});
+            T_vals = array2table(MU, 'VariableNames', tHeaders);
+            T_out  = [T_rows, T_vals];
+            
+            outName = fullfile(outRoot, sprintf('VoltageRaster_Avg_Values_%s.csv', tag));
+            writetable(T_out, outName);
+            fprintf('Saved Raw Voltage Values CSV: %s\n', outName);
+        catch ME
+            warning('Failed to save raw voltage values CSV for %s: %s', tag, ME.message);
+        end
     end
 end

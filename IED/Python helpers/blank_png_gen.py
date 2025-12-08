@@ -4,7 +4,7 @@ from PIL import Image
 # --- Parameters to Change ---
 
 # The total number of images you want to create (e.g., 10 will create 001 to 010)
-TOTAL_IMAGES = 25
+TOTAL_IMAGES = 49
 
 # The dimensions (width and height) of the blank images in pixels
 IMAGE_WIDTH = 100
