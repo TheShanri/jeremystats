@@ -252,8 +252,8 @@ fprintf('Scalogram_Waveform_Stacked_ThirdEvent pipeline done.\n');
         end
         
         % --- FIX: HARD CAP Y-MAX at 2000 uV ---
-        if yMax > 2000
-            yMax = 2000;
+        if yMax > 3000
+            yMax = 3000;
         end
         yL_global = [-yMax, +yMax];
         

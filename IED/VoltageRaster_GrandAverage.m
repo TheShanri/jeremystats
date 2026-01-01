@@ -287,7 +287,6 @@ end
 
 function saveAndRender(grandAvg, tRelMs, chLabels, tag, outDir, clim, count)
     fprintf('\nSaving & Rendering: %s\n', tag);
-
     % Save Results
     outCSV = fullfile(outDir, sprintf('GrandAvg_%s.csv', tag));
     outPng = fullfile(outDir, sprintf('GrandAvg_%s.png', tag));
@@ -348,12 +347,40 @@ function renderGrandAvg(MU, tRelMs, chLabels, tag, outPng, outPdf, clim, nCount)
     set(gca, 'YDir', 'reverse'); 
     caxis([-clim, +clim]);
     colormap(jet); 
+    
     cb = colorbar;
-    cb.Label.String = 'Voltage (µV)';
+    cb.Label.String = 'Voltage (\muV)';
+    cb.Label.Rotation = 90;
     
     xlabel('Time (ms)');
-    set(gca, 'YTick', 1:nCh, 'YTickLabel', chLabels, 'FontSize', 9, 'TickLabelInterpreter', 'none');
-    title(sprintf('Grand Avg %s (N=%d)', tag, nCount), 'FontSize', 12, 'FontWeight', 'bold', 'Interpreter', 'none');
+    ylabel('Channel #'); 
+    
+    % --- CLEAN Y-AXIS LABELS (EXTRACT CSC NUMBER) ---
+    displayLabels = chLabels; 
+    for k = 1:numel(chLabels)
+        rawStr = string(chLabels{k});
+        
+        % 1. Try to find CSC<digits>
+        token = regexp(rawStr, 'CSC(\d+)', 'tokens', 'once');
+        
+        if ~isempty(token)
+            % If found (e.g. "row 1 (CSC4)"), use "4"
+            displayLabels{k} = token{1};
+        else
+            % 2. Fallback: Try to find row <digits>
+            token = regexp(rawStr, 'row\s*(\d+)', 'tokens', 'once');
+            if ~isempty(token)
+                displayLabels{k} = token{1};
+            end
+            % If neither found, it keeps the original string
+        end
+    end
+    
+    set(gca, 'YTick', 1:nCh, 'YTickLabel', displayLabels, ...
+             'FontSize', 9, 'TickLabelInterpreter', 'none');
+    
+    titleStr = sprintf('Grand Average Voltage Raster (%s)', tag);
+    title(titleStr, 'FontSize', 12, 'FontWeight', 'bold', 'Interpreter', 'none');
     
     exportgraphics(f, outPng, 'Resolution', 220);
     try

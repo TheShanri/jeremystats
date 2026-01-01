@@ -2,10 +2,10 @@ function VoltageRaster_GrandAverage_Spatial_Norm(rootFolder, varargin)
 % VoltageRaster_GrandAverage_Spatial_Norm
 % Performs SPATIAL NORMALIZATION based on a "Golden Template" before averaging.
 %
-% UPDATE: DYNAMIC GLOBAL QC SCALING + GROUP TITLES
-% - Pass 1: Loads and warps all data into memory.
-% - Calculation: Determines a single robust color limit across ALL sessions.
-% - Pass 2: Renders QC plots with "Base" or "CNO" in the title.
+% UPDATE: 
+% - Grand Average outputs are CROPPED (Excludes "ABOVE" and "BELOW" regions).
+% - QC plots remain full depth.
+% - Dynamic Global Scaling calculated from full data.
 %
 % Usage:
 %   VoltageRaster_GrandAverage_Spatial_Norm(rootFolder)
@@ -27,7 +27,7 @@ function VoltageRaster_GrandAverage_Spatial_Norm(rootFolder, varargin)
     if ~exist(qcDir, 'dir'),  mkdir(qcDir);  end
     
     fprintf('\n======================================================\n');
-    fprintf('   SPATIAL NORMALIZATION & GRAND AVERAGE (DYNAMIC GLOBAL)\n');
+    fprintf('   SPATIAL NORMALIZATION & GRAND AVERAGE (CROPPED)\n');
     fprintf('======================================================\n');
     fprintf('Output: %s\n', outDir);
     
@@ -65,7 +65,7 @@ function VoltageRaster_GrandAverage_Spatial_Norm(rootFolder, varargin)
     validCNOClean  = cellfun(@(x) sanitizeSessionID(char(x)), validCNO,  'UniformOutput', false);
     
     fprintf('  -> Targets: %d Base, %d CNO sessions defined.\n', numel(validBase), numel(validCNO));
-
+    
     % B. Golden Template
     goldFile = fullfile(rootFolder, 'Golden_Template_Full_Probe.xlsx');
     if ~isfile(goldFile), error('Missing Golden_Template_Full_Probe.xlsx'); end
@@ -87,7 +87,7 @@ function VoltageRaster_GrandAverage_Spatial_Norm(rootFolder, varargin)
     fprintf('Loaded Channel Maps (%d rows). Indexing...\n', height(T_map_raw));
     
     SessionMap = indexSessionMaps(T_map_raw);
-
+    
     % --- 2. File Discovery & Classification ---
     fileName = 'VoltageRaster_Avg_Values_SOLID.csv';
     fprintf('\nSearching for "%s"...\n', fileName);
@@ -124,10 +124,8 @@ function VoltageRaster_GrandAverage_Spatial_Norm(rootFolder, varargin)
             fprintf('  [CNO ] %s (ID: %s)\n', allFiles(i).name, cleanID);
         end
     end
-
-    % --- 3. Compute & Store (Pass 1) ---
-    % Instead of plotting immediately, we store everything in struct arrays.
     
+    % --- 3. Compute & Store (Pass 1) ---
     fprintf('\n--- LOADING BASELINE DATA ---\n');
     [avgBase, tBase, DataBase] = processGroupData(baseFiles, baseIDs, T_gold, SessionMap);
     
@@ -141,11 +139,9 @@ function VoltageRaster_GrandAverage_Spatial_Norm(rootFolder, varargin)
     else
         % Collect representative values from ALL sessions (Robust Percentile)
         vals = [];
-        % Sample from Base
         for i=1:numel(DataBase)
             if ~isempty(DataBase(i).mat), vals = [vals; abs(DataBase(i).mat(:))]; end %#ok<AGROW>
         end
-        % Sample from CNO
         for i=1:numel(DataCNO)
             if ~isempty(DataCNO(i).mat), vals = [vals; abs(DataCNO(i).mat(:))]; end %#ok<AGROW>
         end
@@ -154,24 +150,25 @@ function VoltageRaster_GrandAverage_Spatial_Norm(rootFolder, varargin)
         if isempty(vals)
             globalClim = 100; 
         else
-            % 99.5th percentile of the entire dataset + 10% headroom
+            % 99.5th percentile + 10% headroom
             globalClim = prctile(vals, 99.5) * 1.1; 
         end
         fprintf('\n[SCALE] Auto Dynamic Global CLim: %.2f uV (Calculated from %d data points)\n', globalClim, numel(vals));
     end
     
     % --- 5. Render QC Plots (Pass 2) ---
+    % QC plots remain FULL PROBE DEPTH
     fprintf('\n--- GENERATING QC PLOTS (Fixed Scale) ---\n');
-    % --- UPDATE: Passing group label to renderQCSet ---
     renderQCSet(DataBase, T_gold, qcDir, globalClim, 'Base');
     renderQCSet(DataCNO,  T_gold, qcDir, globalClim, 'CNO');
     
-    % --- 6. Render Grand Averages ---
+    % --- 6. Render Grand Averages (Cropped) ---
+    % This now uses saveAndRenderGrandAvg to exclude buffer regions
     if ~isempty(avgBase)
-        saveAndRender(avgBase, tBase, T_gold, 'SOLID_Base', outDir, globalClim, numel(DataBase));
+        saveAndRenderGrandAvg(avgBase, tBase, T_gold, 'SOLID_Base', outDir, globalClim, numel(DataBase));
     end
     if ~isempty(avgCNO)
-        saveAndRender(avgCNO, tCNO, T_gold, 'SOLID_CNO', outDir, globalClim, numel(DataCNO));
+        saveAndRenderGrandAvg(avgCNO, tCNO, T_gold, 'SOLID_CNO', outDir, globalClim, numel(DataCNO));
     end
     
     fprintf('Done.\n');
@@ -180,7 +177,6 @@ end
 % ======================================================================
 %                        CORE LOGIC
 % ======================================================================
-
 function cleanID = sanitizeSessionID(rawID)
     if isempty(rawID), cleanID = ''; return; end
     str = lower(string(rawID));
@@ -344,7 +340,6 @@ function renderQCSet(DataStruct, T_gold, qcDir, clim, groupName)
         caxis([-clim, +clim]);
         colormap(jet); colorbar;
         
-        % --- UPDATE: Title includes Group Name ---
         title(sprintf('QC [%s]: %s (Dynamic Global CLim=%.0f)', groupName, sessionID, clim), 'Interpreter', 'none');
         
         hold on; yCursor = 0.5;
@@ -357,7 +352,6 @@ function renderQCSet(DataStruct, T_gold, qcDir, clim, groupName)
             yCursor = yCursor + th;
         end
         
-        % Filename includes group so they don't overwrite if IDs duplicate (unlikely but safe)
         outName = fullfile(qcDir, sprintf('QC_%s_%s.png', groupName, sessionID));
         exportgraphics(f, outName, 'Resolution', 150);
         close(f);
@@ -367,7 +361,6 @@ end
 % ======================================================================
 %                        HELPER UTILITIES
 % ======================================================================
-
 function SessionMap = indexSessionMaps(T_detailed)
     SessionMap = containers.Map;
     sessions = unique(T_detailed.Session_ID);
@@ -388,25 +381,63 @@ function SessionMap = indexSessionMaps(T_detailed)
     end
 end
 
-function saveAndRender(grandAvg, tRelMs, T_gold, tag, outDir, clim, count)
+function saveAndRenderGrandAvg(grandAvg, tRelMs, T_gold, tag, outDir, clim, count)
+    % CROPPING: Exclude 'ABOVE CA1 SLM' and 'BELOW DG OML2'
+    
+    % 1. Identify rows to keep
+    rowsToKeep = [];
+    regionsToKeep = {};
+    thicknessToKeep = [];
+    
+    yCursor = 0.5;
+    currentStartRow = 1;
+    
+    for i = 1:height(T_gold)
+        rName = char(T_gold.Region{i});
+        th = T_gold.Target_Thickness(i);
+        
+        % Check if this region is one of the buffers
+        isBuffer = contains(upper(rName), 'ABOVE') || contains(upper(rName), 'BELOW');
+        
+        if ~isBuffer
+            % Add indices to filter
+            endRow = currentStartRow + th - 1;
+            rowsToKeep = [rowsToKeep, currentStartRow:endRow]; %#ok<AGROW>
+            regionsToKeep{end+1} = rName; %#ok<AGROW>
+            thicknessToKeep(end+1) = th; %#ok<AGROW>
+        end
+        currentStartRow = currentStartRow + th;
+    end
+    
+    if isempty(rowsToKeep)
+        % Fallback if something matched wrong
+        rowsToKeep = 1:size(grandAvg,1);
+        regionsToKeep = T_gold.Region;
+        thicknessToKeep = T_gold.Target_Thickness;
+    end
+    
+    % 2. Crop Data
+    grandAvgCropped = grandAvg(rowsToKeep, :);
+    
+    % 3. Output Filenames
     outCSV = fullfile(outDir, sprintf('GrandAvg_%s.csv', tag));
     outPng = fullfile(outDir, sprintf('GrandAvg_%s.png', tag));
     outPdf = fullfile(outDir, sprintf('GrandAvg_%s.pdf', tag));
     
     try
-        T_out = array2table(grandAvg);
+        T_out = array2table(grandAvgCropped);
         writetable(T_out, outCSV);
         fprintf('Saved CSV: %s\n', outCSV);
     catch
     end
     
-    nCh = size(grandAvg, 1);
+    nCh = size(grandAvgCropped, 1);
     f = figure('Color','w','Visible','off','Position',[100 100 1200 800]);
     set(f, 'Units', 'inches');
     figPos = get(f, 'Position');
     set(f, 'PaperUnits', 'inches', 'PaperSize', [figPos(3) figPos(4)], 'PaperPosition', [0 0 figPos(3) figPos(4)]);
-
-    imagesc(tRelMs, 1:nCh, grandAvg);
+    
+    imagesc(tRelMs, 1:nCh, grandAvgCropped);
     set(gca, 'YDir', 'reverse');
     caxis([-clim, +clim]);
     colormap(jet);
@@ -416,10 +447,15 @@ function saveAndRender(grandAvg, tRelMs, T_gold, tag, outDir, clim, count)
     xlabel('Time (ms)');
     title(sprintf('Spatially Normalized Grand Avg %s (N=%d)', tag, count), 'Interpreter', 'none');
     
-    hold on; yCursor = 0.5; yticks = []; ylabels = {};
-    for i = 1:height(T_gold)
-        th = T_gold.Target_Thickness(i);
-        rName = char(T_gold.Region{i});
+    hold on; 
+    yCursor = 0.5; 
+    yticks = []; 
+    ylabels = {};
+    
+    % Draw lines only for kept regions
+    for i = 1:length(regionsToKeep)
+        th = thicknessToKeep(i);
+        rName = regionsToKeep{i};
         yticks(end+1) = yCursor + th/2; %#ok<AGROW>
         ylabels{end+1} = rName; %#ok<AGROW>
         yLine = yCursor + th;
