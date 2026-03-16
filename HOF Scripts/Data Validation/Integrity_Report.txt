@@ -1,0 +1,119 @@
+Integrity Check Report for: \\netfiles03.uvm.edu\bigdata_jbarry\HOF
+============================================================
+
+SUMMARY:
+PASS: 42 folders
+FAIL: 20 folders
+
+============================================================
+FAILED DIRECTORIES (Incomplete or Empty)
+============================================================
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con1\multi_spcon_con1_J1_spcon\2025-09-16_11-03-14
+       Missing 4 files.
+       Examples: CSC30.ncs, CSC43.ncs, CSC50.ncs...
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con3\multi_spcon_con3_J1_FP2
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con3\multi_spcon_con3_J1_spcon
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\J1s291225_SP1\2025-09-13_12-47-06
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s291225_SP1\2025-09-12_17-33-58
+       Missing 63 files.
+       Examples: CSC3.ncs, CSC61.ncs, CSC43.ncs...
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s291225_SP1\2025-09-12_17-35-34
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s291225_SP1\2025-09-12_17-37-32
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s291225_SP1\2025-09-12_17-38-12
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s291225_SP1\2025-09-12_17-39-57
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s291225_SP1\2025-09-12_17-42-14
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon2\J1S291325_FP2\2025-09-13_12-39-02
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon2\J1S291325_FP2\2025-09-13_12-40-08
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\con1\con1_spcon\2025-09-16_14-23-10
+       Missing 10 files.
+       Examples: CSC15.ncs, CSC61.ncs, CSC6.ncs...
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\J2S191225_FP2\2025-09-13_12-41-22
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon1\J2S191225_FP\2025-09-12_17-30-35
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon1\J2S191225_FP\2025-09-12_17-32-49
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon1\J2S191225_FP2\2025-09-13_09-53-48
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon1\J2S191225_FP2\2025-09-13_10-15-34\ConfigurationLog
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon2\J2S291325_FP2
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+[FAIL] \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon2\J2S291325_SPCON\2025-09-14_10-53-49
+       Status: EMPTY or No CSC data found.
+----------------------------------------
+
+============================================================
+PASSED DIRECTORIES (Data Complete)
+============================================================
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con1\multi_spcon_con1_J1_FP1\2025-09-16_10-47-50
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con1\multi_spcon_con1_J1_FP2\2025-09-16_12-35-36
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con2\Multi_Spcon_J1_Con2_FP1\2025-09-17_09-58-19
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con2\Multi_Spcon_J1_Con2_FP2\2025-09-17_11-55-51
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con2\Multi_Spcon_J1_Con2_SPCON\2025-09-17_10-23-59
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Con3\multi_spcon_con3_J1_FP1\2025-09-18_10-56-18
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1S191225_FP\2025-09-12_11-22-56
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s191225_FP2\2025-09-12_13-22-37
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\Precon1\J1s291225_SP1\2025-09-12_11-47-37
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon2\J1S291325_FP1\2025-09-13_10-20-40
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon2\J1S291325_FP2\2025-09-13_12-22-27
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon2\J1S291325_SPCON\2025-09-13_10-49-53
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon3\Pre3FP1\2025-09-14_11-22-47
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon3\pre3FP2\2025-09-14_13-03-29
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon3\Pre3SPcon\2025-09-14_11-29-47
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon4\multi_spcon_J1_precon4_FP1\2025-09-15_10-50-37
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon4\multi_spcon_J1_precon4_FP2\2025-09-15_12-31-41
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J1\precon4\multi_spcon_J1_precon4_spcon\2025-09-15_10-58-54
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\con1\con1_fp1\2025-09-16_13-23-20
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\con1\con1_fp2\2025-09-16_15-56-51
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con2\Multi_Spcon_J2_Con2_FP1\2025-09-17_12-20-47
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con2\Multi_Spcon_J2_Con2_FP2\2025-09-17_15-06-20
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con2\Multi_Spcon_J2_Con2_SPCON\2025-09-17_13-33-53
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con3\multi_spcon_con3_J2_FP1\2025-09-18_12-56-26
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con3\multi_spcon_con3_J2_FP2\2025-09-18_14-53-14
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con3\multi_spcon_con3_J2_spcon\2025-09-18_13-22-00
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con4\Mulit_SPCON_Con4_spcon\2025-09-19_12-36-52
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con4\Multi_SPCon_Con4_FP1\2025-09-19_12-27-28
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Con4\Multi_spcon_con4_FP2\2025-09-19_14-09-32
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon1\J2S191225_FP\2025-09-12_15-14-42
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon1\J2S191225_FP2\2025-09-12_17-49-55
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon2\J2S291325_FP1\2025-09-13_12-51-49
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon2\J2S291325_SPCON\2025-09-13_14-01-39
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon3\multi_spcon_precon3_FP1\2025-09-14_14-19-01
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon3\multi_spcon_precon3_FP2\2025-09-14_16-18-01
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon3\multi_spcon_precon3_spcon\2025-09-14_14-46-12
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon4\multi_spcon_J2_precon4_FP1\2025-09-15_12-45-19
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon4\multi_spcon_J2_precon4_FP2\2025-09-15_16-02-32
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\precon4\multi_spcon_J2_precon4_spcon\2025-09-15_14-31-13
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Test1\Multi_Spcon_J2_Test1_FP1\2025-09-20_12-25-57
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Test1\Multi_Spcon_J2_Test1_FP2\2025-09-20_14-05-50
+[OK]   \\netfiles03.uvm.edu\bigdata_jbarry\HOF\Joe_multiSite\J2\Test1\Multi_Spcon_J2_Test1_spcon\2025-09-20_12-34-05

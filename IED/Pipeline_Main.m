@@ -206,7 +206,7 @@ fprintf('--------------------------------------------------------\n');
 fprintf('===== [6] RUNNING Scalogram_Waveform_Stacked_ThirdEvent_Pipeline =====\n');
 spec3rdRes = [];
 try
-    spec3rdRes = Scalogram_Waveform_Stacked_ThirdEvent_Pipeline(inputFolder, dataMatPath, varargin{:});
+    spec3rdRes = Scalogram_Waveform_Stacked_ThirdEvent_RandomControl_Pipeline(inputFolder, dataMatPath, varargin{:});
     fprintf('  [6] SUCCESS: Spectrogram_Waveform_Stacked_ThirdEvent_Pipeline completed.\n');
     if isstruct(spec3rdRes) && isfield(spec3rdRes, 'pngSolid')
         fprintf('      -> SOLID PNG: %s\n', getFieldSafe(spec3rdRes, 'pngSolid'));

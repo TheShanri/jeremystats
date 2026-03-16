@@ -1,0 +1,139 @@
+import os
+import json
+import sys
+
+def build_jstree_data(path):
+    """
+    Builds JSON specifically for the 'jstree' library.
+    Keys required: 'text' (name), 'icon', and 'children'.
+    """
+    name = os.path.basename(path)
+    if not name: 
+        name = os.path.basename(os.path.dirname(path))
+
+    is_dir = os.path.isdir(path)
+    
+    node = {
+        "text": name,
+        "icon": "jstree-folder" if is_dir else "jstree-file"
+    }
+
+    if is_dir:
+        children = []
+        try:
+            with os.scandir(path) as it:
+                # Sort: Folders first, then files
+                entries = sorted(list(it), key=lambda e: (not e.is_dir(), e.name.lower()))
+                
+                for entry in entries:
+                    if entry.is_dir():
+                        children.append(build_jstree_data(entry.path))
+                    else:
+                        children.append({
+                            "text": entry.name,
+                            "icon": "jstree-file"
+                        })
+            
+            # If folder has content, add children
+            if children:
+                node["children"] = children
+        except PermissionError:
+            node["text"] += " (Access Denied)"
+            node["icon"] = "jstree-danger" # Red warning icon if available, or generic
+    
+    return node
+
+def generate_html(tree_data, output_file):
+    # Wrap data in a list because jstree expects an array of roots
+    json_data = json.dumps([tree_data])
+
+    html_template = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>HOF File Explorer</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/themes/default/style.min.css" />
+        <style>
+            body {{ font-family: sans-serif; padding: 20px; background: #fcfcfc; }}
+            #search {{ 
+                margin-bottom: 20px; 
+                padding: 10px; 
+                width: 300px; 
+                border: 1px solid #ccc; 
+                border-radius: 4px; 
+            }}
+            .header {{ margin-bottom: 20px; color: #333; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h2>HOF Directory Browser</h2>
+            <input type="text" id="search" placeholder="Search files..." />
+            <button onclick="collapseAll()">Collapse All</button>
+            <button onclick="expandAll()">Expand All</button>
+        </div>
+
+        <div id="file_tree"></div>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/jstree.min.js"></script>
+
+        <script>
+            $(document).ready(function () {{
+                // Initialize the tree
+                $('#file_tree').jstree({{
+                    'core': {{
+                        'data': {json_data},
+                        'themes': {{
+                            'name': 'default',
+                            'responsive': true
+                        }}
+                    }},
+                    'plugins': ['search', 'types']
+                }});
+
+                // Search functionality
+                var to = false;
+                $('#search').keyup(function () {{
+                    if(to) {{ clearTimeout(to); }}
+                    to = setTimeout(function () {{
+                        var v = $('#search').val();
+                        $('#file_tree').jstree(true).search(v);
+                    }}, 250);
+                }});
+            }});
+
+            function collapseAll() {{
+                $('#file_tree').jstree('close_all');
+            }}
+            
+            function expandAll() {{
+                $('#file_tree').jstree('open_all');
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(html_template)
+
+if __name__ == "__main__":
+    target_path = r"\\netfiles03.uvm.edu\bigdata_jbarry\HOF"
+    
+    script_location = os.path.dirname(os.path.abspath(__file__))
+    output_filename = os.path.join(script_location, "HOF_File_Explorer.html")
+
+    if not os.path.exists(target_path):
+        print(f"Error: Cannot access {target_path}")
+    else:
+        print(f"Scanning {target_path}...")
+        data = build_jstree_data(target_path)
+        
+        # Open the root node by default
+        data['state'] = {'opened': True}
+        
+        print("Generating Explorer View...")
+        generate_html(data, output_filename)
+        print(f"Done! Open: {output_filename}")

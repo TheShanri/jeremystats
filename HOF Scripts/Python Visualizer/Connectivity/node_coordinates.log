@@ -1,0 +1,75 @@
+Image Dimensions: 1000x1000 pixels (DPI: 100.0)
+==================================================
+
+Node: ACC_R
+  Center X (px): 607.4
+  Center Y (px, Top-Left Origin / UI Mapping): 99.17
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 900.83
+  Radius (px): 49.56
+--------------------------------------------------
+Node: OFC_R
+  Center X (px): 793.43
+  Center Y (px, Top-Left Origin / UI Mapping): 206.57
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 793.43
+  Radius (px): 49.56
+--------------------------------------------------
+Node: DHC_R
+  Center X (px): 900.83
+  Center Y (px, Top-Left Origin / UI Mapping): 392.6
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 607.4
+  Radius (px): 49.56
+--------------------------------------------------
+Node: RSC_R
+  Center X (px): 900.83
+  Center Y (px, Top-Left Origin / UI Mapping): 607.4
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 392.6
+  Radius (px): 49.56
+--------------------------------------------------
+Node: PER_R
+  Center X (px): 793.43
+  Center Y (px, Top-Left Origin / UI Mapping): 793.43
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 206.57
+  Radius (px): 49.56
+--------------------------------------------------
+Node: POR_R
+  Center X (px): 607.4
+  Center Y (px, Top-Left Origin / UI Mapping): 900.83
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 99.17
+  Radius (px): 49.56
+--------------------------------------------------
+Node: POR_L
+  Center X (px): 392.6
+  Center Y (px, Top-Left Origin / UI Mapping): 900.83
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 99.17
+  Radius (px): 49.56
+--------------------------------------------------
+Node: PER_L
+  Center X (px): 206.57
+  Center Y (px, Top-Left Origin / UI Mapping): 793.43
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 206.57
+  Radius (px): 49.56
+--------------------------------------------------
+Node: RSC_L
+  Center X (px): 99.17
+  Center Y (px, Top-Left Origin / UI Mapping): 607.4
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 392.6
+  Radius (px): 49.56
+--------------------------------------------------
+Node: DHC_L
+  Center X (px): 99.17
+  Center Y (px, Top-Left Origin / UI Mapping): 392.6
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 607.4
+  Radius (px): 49.56
+--------------------------------------------------
+Node: OFC_L
+  Center X (px): 206.57
+  Center Y (px, Top-Left Origin / UI Mapping): 206.57
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 793.43
+  Radius (px): 49.56
+--------------------------------------------------
+Node: ACC_L
+  Center X (px): 392.6
+  Center Y (px, Top-Left Origin / UI Mapping): 99.17
+  Center Y (px, Bottom-Left Origin / Plot Mapping): 900.83
+  Radius (px): 49.56
+--------------------------------------------------
